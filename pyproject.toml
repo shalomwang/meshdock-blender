@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meshdock-blender"
+version = "0.9.6"
+description = "Generic Blender AI 3D generation pipeline with provider adapters and a local MCP sidecar"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Shalom Wang" }]
+
+[project.scripts]
+meshdock-mcp = "meshdock.sidecar.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["meshdock*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+id = "meshdock"
+version = "0.9.6"
+name = "MeshDock"
+tagline = "Generate, compare, process, rig and export AI 3D assets"
+maintainer = "Shalom Wang"
+type = "add-on"
+blender_version_min = "5.2.0"
+license = ["SPDX:MIT"]
+
+[permissions]
+network = "Connect to 3D providers and the local MCP sidecar"
+files = "Stage candidates and export approved assets"

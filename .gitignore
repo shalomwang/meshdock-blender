@@ -1,0 +1,44 @@
+# Python caches and tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+
+# Build and packaging output
+build/
+dist/
+wheelhouse/
+*.whl
+*.zip
+
+# Runtime data and local configuration
+staging/
+.tmp/
+.codex/
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.temp
+*.part
+*.bak
+
+# Blender recovery and local scene files
+*.blend1
+*.blend2
+*.blend@
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

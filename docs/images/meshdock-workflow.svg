@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
+  <title id="title">MeshDock workflow overview</title>
+  <desc id="desc">Users work through the MeshDock Blender panel, while coding agents use MeshDock MCP for AI generation and Blender MCP for scene inspection and cleanup.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111f"/>
+      <stop offset="1" stop-color="#111b31"/>
+    </linearGradient>
+    <linearGradient id="meshDock" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#102a43"/>
+      <stop offset="1" stop-color="#173b56"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000814" flood-opacity="0.35"/>
+    </filter>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#59c3ff"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#55d6a5"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Inter, "Segoe UI", sans-serif; fill: #f4f8ff; }
+      .subtitle { font: 400 17px Inter, "Segoe UI", sans-serif; fill: #9fb2cb; }
+      .section { font: 700 20px Inter, "Segoe UI", sans-serif; fill: #eef7ff; }
+      .label { font: 600 16px Inter, "Segoe UI", sans-serif; fill: #e8f2ff; }
+      .body { font: 400 14px Inter, "Segoe UI", sans-serif; fill: #aebfd4; }
+      .small { font: 500 13px Inter, "Segoe UI", sans-serif; fill: #90a9c4; }
+      .chip { font: 600 14px Inter, "Segoe UI", sans-serif; fill: #dfefff; }
+      .line-blue { fill: none; stroke: #59c3ff; stroke-width: 3; marker-end: url(#arrowBlue); }
+      .line-green { fill: none; stroke: #55d6a5; stroke-width: 3; marker-end: url(#arrowGreen); }
+    </style>
+  </defs>
+
+  <rect width="1400" height="760" rx="28" fill="url(#background)"/>
+  <circle cx="1260" cy="55" r="190" fill="#2b87ff" opacity="0.06"/>
+  <circle cx="135" cy="720" r="220" fill="#39d6a3" opacity="0.05"/>
+
+  <text x="64" y="62" class="title">MeshDock：把 AI 3D 生成接回 Blender</text>
+  <text x="64" y="96" class="subtitle">同一套供应商 API，同时服务 Blender 用户与 Codex、Claude Code、OpenCode 等 Agent</text>
+
+  <!-- User -->
+  <rect x="64" y="155" width="300" height="190" rx="22" fill="#121f35" stroke="#2a4664" filter="url(#shadow)"/>
+  <circle cx="108" cy="205" r="22" fill="#1f78b5"/>
+  <path d="M99 205a9 9 0 1 1 18 0a9 9 0 1 1-18 0M91 235c4-13 13-19 26-19s22 6 26 19" fill="none" stroke="#e9f6ff" stroke-width="4" stroke-linecap="round"/>
+  <text x="150" y="201" class="section">Blender 用户</text>
+  <text x="150" y="227" class="body">不离开 Blender 即可完成</text>
+  <rect x="91" y="263" width="118" height="40" rx="12" fill="#183552"/>
+  <text x="150" y="288" text-anchor="middle" class="chip">生成与比较</text>
+  <rect x="220" y="263" width="118" height="40" rx="12" fill="#183552"/>
+  <text x="279" y="288" text-anchor="middle" class="chip">导入与处理</text>
+  <text x="91" y="326" class="small">无需浏览器下载、搬运和重复导入</text>
+
+  <!-- Agent -->
+  <rect x="64" y="404" width="300" height="234" rx="22" fill="#121f35" stroke="#2a4664" filter="url(#shadow)"/>
+  <rect x="91" y="440" width="48" height="36" rx="8" fill="#246a56"/>
+  <path d="M102 452l-6 6l6 6M128 452l6 6l-6 6M119 448l-8 20" fill="none" stroke="#eafff7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="156" y="454" class="section">Agent</text>
+  <text x="156" y="480" class="body">Codex · Claude Code · OpenCode</text>
+  <rect x="91" y="515" width="246" height="43" rx="12" fill="#173a47"/>
+  <text x="214" y="542" text-anchor="middle" class="chip">编排生成和后处理任务</text>
+  <rect x="91" y="570" width="246" height="43" rx="12" fill="#173a47"/>
+  <text x="214" y="597" text-anchor="middle" class="chip">检查并清理 Blender 场景</text>
+
+  <!-- MeshDock and Blender -->
+  <rect x="470" y="155" width="474" height="410" rx="26" fill="url(#meshDock)" stroke="#3281a8" stroke-width="2" filter="url(#shadow)"/>
+  <text x="510" y="202" class="section">MeshDock + Blender</text>
+  <text x="510" y="228" class="body">生成任务、候选文件与场景状态在这里汇合</text>
+
+  <rect x="510" y="263" width="184" height="205" rx="18" fill="#0e1a2c" stroke="#3c7898"/>
+  <rect x="534" y="288" width="136" height="28" rx="8" fill="#225c7a"/>
+  <text x="602" y="307" text-anchor="middle" class="chip">MeshDock 面板</text>
+  <text x="534" y="346" class="body">• 账号与模型选择</text>
+  <text x="534" y="376" class="body">• 参考图与生成参数</text>
+  <text x="534" y="406" class="body">• 候选导入与审阅</text>
+  <text x="534" y="436" class="body">• 人工批准与导出</text>
+
+  <rect x="720" y="263" width="184" height="205" rx="18" fill="#0e1a2c" stroke="#3c7898"/>
+  <rect x="744" y="288" width="136" height="28" rx="8" fill="#225c7a"/>
+  <text x="812" y="307" text-anchor="middle" class="chip">MeshDock MCP</text>
+  <text x="744" y="346" class="body">• 高层资产任务</text>
+  <text x="744" y="376" class="body">• 查询与任务恢复</text>
+  <text x="744" y="406" class="body">• 受限工具白名单</text>
+  <text x="744" y="436" class="body">• 不持有供应商密钥</text>
+
+  <rect x="510" y="492" width="394" height="48" rx="13" fill="#13253a" stroke="#3b5d78"/>
+  <path d="M537 510v-5a9 9 0 0 1 18 0v5M534 510h24v18h-24z" fill="none" stroke="#ffcf70" stroke-width="2.5"/>
+  <text x="575" y="522" class="label">系统凭据库</text>
+  <text x="702" y="522" class="small">密钥只在 Blender 侧解析</text>
+
+  <!-- Blender MCP -->
+  <rect x="470" y="614" width="474" height="92" rx="20" fill="#102a27" stroke="#2f8c70" stroke-width="2"/>
+  <text x="504" y="652" class="section">Blender MCP</text>
+  <text x="504" y="679" class="body">场景检查 · 变换 · Collection · 材质 · 确定性清理</text>
+
+  <!-- Providers -->
+  <rect x="1040" y="155" width="296" height="410" rx="26" fill="#121f35" stroke="#2a4664" filter="url(#shadow)"/>
+  <text x="1076" y="202" class="section">AI 3D Providers</text>
+  <text x="1076" y="228" class="body">擅长生成基础几何与纹理</text>
+  <rect x="1076" y="268" width="224" height="54" rx="14" fill="#183552"/>
+  <text x="1188" y="301" text-anchor="middle" class="label">Tripo 中国大陆版</text>
+  <rect x="1076" y="336" width="224" height="54" rx="14" fill="#183552"/>
+  <text x="1188" y="369" text-anchor="middle" class="label">Tripo 国际版</text>
+  <rect x="1076" y="404" width="224" height="54" rx="14" fill="#183552"/>
+  <text x="1188" y="437" text-anchor="middle" class="label">混元生 3D 直连</text>
+  <rect x="1076" y="472" width="224" height="54" rx="14" fill="#183552"/>
+  <text x="1188" y="505" text-anchor="middle" class="label">TokenHub</text>
+
+  <!-- Connections -->
+  <path d="M364 250 C410 250 424 330 510 330" class="line-blue"/>
+  <text x="397" y="260" class="small">面板操作</text>
+  <path d="M364 485 C425 485 424 374 720 374" class="line-blue"/>
+  <text x="403" y="449" class="small">高层任务</text>
+  <path d="M364 586 C420 586 425 660 470 660" class="line-green"/>
+  <text x="395" y="616" class="small">场景操作</text>
+  <path d="M944 360 C985 360 998 360 1040 360" class="line-blue"/>
+  <text x="966" y="344" class="small">API</text>
+  <path d="M1040 430 C995 430 980 470 944 470" class="line-green"/>
+  <text x="965" y="464" class="small">候选</text>
+  <path d="M706 614 L706 565" class="line-green"/>
+</svg>

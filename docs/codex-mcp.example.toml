@@ -1,0 +1,100 @@
+# Copy this table into a trusted project's .codex/config.toml.
+# No provider secret belongs here. Start Blender and enable the extension first.
+[mcp_servers.meshdock]
+command = "python"
+args = ["-m", "meshdock.sidecar"]
+enabled = true
+required = false
+startup_timeout_sec = 10
+tool_timeout_sec = 120
+enabled_tools = [
+  "get_pipeline_capabilities",
+  "get_generation_constraints",
+  "get_process_capabilities",
+  "provider_status",
+  "list_reference_images",
+  "list_asset_jobs",
+  "create_asset_job",
+  "create_asset_batch",
+  "generate_candidates",
+  "cancel_asset_job",
+  "pause_asset_job",
+  "unpause_asset_job",
+  "set_asset_job_priority",
+  "resume_asset_job",
+  "retry_asset_job",
+  "regenerate_candidate",
+  "archive_asset_job",
+  "purge_archived_jobs",
+  "get_job_status",
+  "import_candidate",
+  "normalize_candidate",
+  "render_review_pack",
+  "retopologize_candidate",
+  "unwrap_candidate",
+  "texture_candidate",
+  "segment_candidate",
+  "convert_candidate",
+  "check_riggability",
+  "rig_candidate",
+  "animate_candidate",
+  "get_process_status",
+  "cancel_process_task",
+  "pause_process_task",
+  "unpause_process_task",
+  "resume_process_task",
+  "list_candidate_actions",
+  "activate_candidate_action",
+  "export_selected_asset",
+  "get_blender_task_status",
+  "cancel_blender_task",
+]
+default_tools_approval_mode = "writes"
+
+[mcp_servers.meshdock.tools.generate_candidates]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.import_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.retry_asset_job]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.regenerate_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.cancel_asset_job]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.normalize_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.export_selected_asset]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.create_asset_batch]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.purge_archived_jobs]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.retopologize_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.unwrap_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.texture_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.segment_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.convert_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.rig_candidate]
+approval_mode = "prompt"
+
+[mcp_servers.meshdock.tools.animate_candidate]
+approval_mode = "prompt"
