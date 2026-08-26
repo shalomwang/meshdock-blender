@@ -5,6 +5,7 @@ import re
 import zlib
 
 import bpy
+from bpy.app.translations import pgettext_iface as iface_
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
 from ..core.profiles import PROFILES
@@ -708,7 +709,13 @@ def _process_operation_items(self, _context):
         if operations:
             return _cached_enum_items(
                 ("process", *operations),
-                [_enum_item(key, _PROCESS_LABELS.get(key, key.title()), "Available for selected candidate") for key in operations],
+                _with_valid_enum_default([
+                    _enum_item(
+                        key, _PROCESS_LABELS.get(key, key.title()),
+                        "Available for selected candidate",
+                    )
+                    for key in operations
+                ]),
             )
     except Exception:
         pass
@@ -839,13 +846,59 @@ def _job_items(_self, _context):
         from .runtime import get_runtime
         jobs = get_runtime().service.list_jobs(limit=100)["jobs"]
         if jobs:
-            return [
-                _enum_item(job["id"], f'{job["spec"]["asset_name"]} · {job["state"]}', job["id"])
+            signature = tuple(
+                (
+                    str(job["id"]),
+                    str(job["spec"]["asset_name"]),
+                    str(job["state"]),
+                    len(job.get("candidates", [])),
+                )
                 for job in jobs
-            ]
+            )
+            return _cached_enum_items(
+                ("jobs", *signature),
+                [_enum_item("__none__", iface_("Select a job"), ""), *[
+                    _enum_item(job["id"], str(job["spec"]["asset_name"]), job["id"])
+                    for job in jobs
+                ]],
+            )
     except Exception:
         pass
-    return [_enum_item("__none__", "No jobs", "Create a generation job first")]
+    return _cached_enum_items(
+        ("jobs", "none"),
+        [_enum_item("__none__", "No jobs", "Create a generation job first")],
+    )
+
+
+def _archived_job_items(_self, _context):
+    try:
+        from .runtime import get_runtime
+        jobs = [
+            job for job in get_runtime().service.list_jobs(
+                limit=100, include_archived=True
+            )["jobs"]
+            if job.get("archived")
+        ]
+        if jobs:
+            signature = tuple(
+                (str(job["id"]), str(job["spec"]["asset_name"]), str(job["state"]))
+                for job in jobs
+            )
+            return _cached_enum_items(
+                ("archived_jobs", *signature),
+                _with_valid_enum_default([
+                    _enum_item(
+                        job["id"], str(job["spec"]["asset_name"]), job["id"],
+                    )
+                    for job in jobs
+                ]),
+            )
+    except Exception:
+        pass
+    return _cached_enum_items(
+        ("archived_jobs", "none"),
+        [_enum_item("__none__", "No hidden jobs", "Hidden jobs can be restored here")],
+    )
 
 
 def _candidate_items(self, _context):
@@ -854,13 +907,27 @@ def _candidate_items(self, _context):
         if self.last_job_id and self.last_job_id != "__none__":
             candidates = get_runtime().service.get_job(self.last_job_id)["candidates"]
             if candidates:
-                return [
-                    _enum_item(item["id"], f'{item["label"]} · {item["format"].upper()}', item["provider"])
+                signature = tuple(
+                    (
+                        str(item["id"]), str(item["label"]),
+                        str(item["format"]), str(item["provider"]),
+                    )
                     for item in candidates
-                ]
+                )
+                return _cached_enum_items(("candidates", self.last_job_id, *signature),
+                    _with_valid_enum_default([
+                    _enum_item(
+                        item["id"], f'{iface_("Model")} {index} · {item["format"].upper()}',
+                        item["provider"],
+                    )
+                    for index, item in enumerate(candidates, start=1)
+                ]))
     except Exception:
         pass
-    return [_enum_item("__none__", "No candidates", "Wait for generation to finish")]
+    return _cached_enum_items(
+        ("candidates", self.last_job_id, "none"),
+        [_enum_item("__none__", "No candidates", "Wait for generation to finish")],
+    )
 
 
 def _action_items(self, _context):
@@ -871,10 +938,18 @@ def _action_items(self, _context):
                 self.last_job_id, self.candidate_id
             )["actions"]
             if names:
-                return [_enum_item(name, name, "Imported character animation") for name in names]
+                return _cached_enum_items(
+                    ("actions", self.last_job_id, self.candidate_id, *names),
+                    _with_valid_enum_default([
+                        _enum_item(name, name, "Imported character animation") for name in names
+                    ]),
+                )
     except Exception:
         pass
-    return [_enum_item("__none__", "No Actions", "Import an animated character candidate first")]
+    return _cached_enum_items(
+        ("actions", self.last_job_id, self.candidate_id, "none"),
+        [_enum_item("__none__", "No Actions", "Import an animated character candidate first")],
+    )
 
 
 class AI3D_PG_reference_image(bpy.types.PropertyGroup):
@@ -1022,6 +1097,7 @@ class AI3D_PG_asset_pipeline(bpy.types.PropertyGroup):
     batch_generate: BoolProperty(name="Generate Immediately", default=False)
     purge_older_than_days: IntProperty(name="Purge Archived Older Than", default=30, min=0, max=3650)
     last_job_id: EnumProperty(name="Job", items=_job_items, update=_job_updated)
+    archived_job_id: EnumProperty(name="Hidden Job", items=_archived_job_items)
     candidate_id: EnumProperty(name="Candidate", items=_candidate_items, update=_candidate_updated)
     candidate_note: StringProperty(name="Review Note", default="", maxlen=500)
     process_operation: EnumProperty(

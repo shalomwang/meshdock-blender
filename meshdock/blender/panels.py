@@ -13,7 +13,7 @@ from .runtime import get_runtime
 _STATE_LABELS = {
     "draft": "Draft", "queued": "Queued", "submitted": "Submitted",
     "processing": "Running", "recovery_pending": "Recovery Pending",
-    "candidates_ready": "Candidates Ready", "candidate_imported": "Imported",
+    "candidates_ready": "Models Ready", "candidate_imported": "Models Imported",
     "approved": "Approved", "exported": "Exported", "cancelled": "Cancelled",
     "failed": "Failed", "pending": "Pending", "rejected": "Rejected",
 }
@@ -129,11 +129,12 @@ def _draw_provider_options(layout, props, provider: str) -> None:
 
 
 def _draw_active_job(layout, props, runtime) -> None:
-    if not props.last_job_id or props.last_job_id == "__none__":
-        return
     current = layout.box()
     current.label(text="Current Job", icon="TIME")
     current.prop(props, "last_job_id", text="")
+    if not props.last_job_id or props.last_job_id == "__none__":
+        current.label(text="Select a job to view or import its models.", icon="INFO")
+        return
     try:
         status = runtime.service.get_job(props.last_job_id)
         state = iface_(_STATE_LABELS.get(status["state"], status["state"]))
@@ -149,8 +150,15 @@ def _draw_active_job(layout, props, runtime) -> None:
             current.operator("meshdock.resume_job", icon="FILE_REFRESH")
         elif status["state"] in {"failed", "cancelled"}:
             current.operator("meshdock.retry_job", icon="DUPLICATE")
-        if status["state"] not in {"queued", "submitted", "processing"}:
-            current.operator("meshdock.archive_job", icon="PACKAGE")
+        if status["state"] == "candidates_ready":
+            ready = current.box()
+            if runtime.auto_import_status(props.last_job_id) == "pending":
+                ready.label(text="Downloaded; importing models automatically...", icon="IMPORT")
+            else:
+                ready.label(text="Downloaded models are ready", icon="CHECKMARK")
+                ready.operator("meshdock.import_all_models", icon="IMPORT")
+        elif status["state"] == "candidate_imported":
+            current.label(text="Generated models are in the scene", icon="CHECKMARK")
     except Exception:
         current.label(text="Status temporarily unavailable", icon="ERROR")
 
@@ -193,7 +201,7 @@ class AI3D_PT_asset_pipeline(_PipelinePanel, bpy.types.Panel):
         )
         if props.input_mode != "text":
             _draw_references(create, props)
-        create.prop(props, "candidate_count")
+        create.prop(props, "candidate_count", text="Quantity")
         disclosure = create.row()
         disclosure.prop(
             props, "show_generation_settings", text="Quality & Cost",
@@ -217,7 +225,7 @@ class AI3D_PT_asset_pipeline(_PipelinePanel, bpy.types.Panel):
             if props.show_advanced_generation:
                 settings.prop(props, "advanced_json", text="Extra Options (JSON)")
         action = create.row(align=True)
-        action.operator("meshdock.create_and_generate", text="Generate Candidates", icon="ADD")
+        action.operator("meshdock.create_and_generate", text="Generate", icon="ADD")
         try:
             estimate = generation_cost_estimate(props)
         except Exception:
@@ -240,53 +248,23 @@ class AI3D_PT_asset_pipeline(_PipelinePanel, bpy.types.Panel):
 
 
 class AI3D_PT_candidate_review(_PipelinePanel, bpy.types.Panel):
-    bl_label = "Candidate Review"
+    bl_label = "Generated Models"
     bl_idname = "AI3D_PT_candidate_review"
     bl_parent_id = "AI3D_PT_asset_pipeline"
-    bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
         layout = self.layout
         props = context.scene.meshdock
-        runtime = get_runtime()
-        layout.prop(props, "candidate_id")
-        if props.last_job_id not in {"", "__none__"} and props.candidate_id != "__none__":
-            try:
-                preview_path = runtime.service.candidate_preview_path(props.last_job_id, props.candidate_id)
-                if preview_path:
-                    image = bpy.data.images.load(str(preview_path), check_existing=True)
-                    layout.template_preview(image, show_buttons=False)
-                candidate = next(
-                    item for item in runtime.service.get_job(props.last_job_id)["candidates"]
-                    if item["id"] == props.candidate_id
-                )
-                state = iface_(_STATE_LABELS.get(candidate["review_status"], candidate["review_status"]))
-                layout.label(text=f'{iface_("Review")}: {state}')
-            except Exception:
-                pass
+        layout.prop(props, "candidate_id", text="Model")
         row = layout.row(align=True)
-        row.operator("meshdock.import_candidate", icon="IMPORT")
+        row.enabled = props.last_job_id not in {"", "__none__"}
+        row.operator("meshdock.import_all_models", icon="IMPORT")
+        row.operator("meshdock.open_candidate_folder", text="Open Folder", icon="FILE_FOLDER")
+        row = layout.row(align=True)
+        row.enabled = props.last_job_id not in {"", "__none__"} and props.candidate_id not in {"", "__none__"}
         row.operator("meshdock.prepare_game_asset", text="Normalize", icon="MODIFIER")
-        row = layout.row(align=True)
-        row.operator("meshdock.show_candidate", icon="HIDE_OFF")
-        row.operator("meshdock.show_all_candidates", icon="RESTRICT_VIEW_OFF")
-        layout.operator("meshdock.render_review_pack", icon="RENDER_STILL")
-        layout.prop(props, "candidate_note")
-        row = layout.row(align=True)
-        row.operator("meshdock.reject_candidate", icon="X")
-        row.operator("meshdock.delete_candidate", icon="TRASH")
-        row = layout.row(align=True)
-        row.operator("meshdock.regenerate_candidate", icon="FILE_REFRESH")
-        row.operator("meshdock.approve_candidate", icon="CHECKMARK")
-        try:
-            status = runtime.service.get_job(props.last_job_id)
-            if status["state"] in {"approved", "exported"}:
-                layout.prop(props, "export_format")
-                layout.prop(props, "export_directory")
-                layout.prop(props, "export_json")
-                layout.operator("meshdock.export_reviewed_asset", icon="EXPORT")
-        except Exception:
-            pass
+        row.operator("meshdock.show_candidate", text="Show Model", icon="HIDE_OFF")
+        row.operator("meshdock.show_all_candidates", text="Show All", icon="RESTRICT_VIEW_OFF")
 
 
 class AI3D_PT_processing(_PipelinePanel, bpy.types.Panel):
@@ -374,6 +352,19 @@ class AI3D_PT_pipeline_tools(_PipelinePanel, bpy.types.Panel):
         layout.prop(props, "batch_json")
         layout.prop(props, "batch_generate")
         layout.operator("meshdock.create_batch", icon="SEQ_STRIP_DUPLICATE")
+        hidden = layout.box()
+        hidden.label(text="Job History", icon="PACKAGE")
+        hidden.prop(props, "archived_job_id", text="Hidden Job")
+        restore = hidden.row(align=True)
+        restore.enabled = props.archived_job_id not in {"", "__none__"}
+        restore.operator("meshdock.restore_archived_job", icon="LOOP_BACK")
+        try:
+            current = runtime.service.get_job(props.last_job_id)
+            if current["state"] not in {"queued", "submitted", "processing"}:
+                hidden.operator("meshdock.archive_job", text="Hide Current Job", icon="HIDE_ON")
+        except Exception:
+            pass
+        hidden.label(text="Hiding never downloads or deletes files.", icon="INFO")
         row = layout.row(align=True)
         row.prop(props, "purge_older_than_days", text="Archived Days")
         row.operator("meshdock.purge_archived_jobs", text="Purge", icon="TRASH")

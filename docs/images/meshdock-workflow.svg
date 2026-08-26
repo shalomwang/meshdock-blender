@@ -65,14 +65,14 @@
   <!-- MeshDock and Blender -->
   <rect x="470" y="155" width="474" height="410" rx="26" fill="url(#meshDock)" stroke="#3281a8" stroke-width="2" filter="url(#shadow)"/>
   <text x="510" y="202" class="section">MeshDock + Blender</text>
-  <text x="510" y="228" class="body">生成任务、候选文件与场景状态在这里汇合</text>
+  <text x="510" y="228" class="body">生成任务、模型文件与场景状态在这里汇合</text>
 
   <rect x="510" y="263" width="184" height="205" rx="18" fill="#0e1a2c" stroke="#3c7898"/>
   <rect x="534" y="288" width="136" height="28" rx="8" fill="#225c7a"/>
   <text x="602" y="307" text-anchor="middle" class="chip">MeshDock 面板</text>
   <text x="534" y="346" class="body">• 账号与模型选择</text>
   <text x="534" y="376" class="body">• 参考图与生成参数</text>
-  <text x="534" y="406" class="body">• 候选导入与审阅</text>
+  <text x="534" y="406" class="body">• 模型自动导入与排列</text>
   <text x="534" y="436" class="body">• 人工批准与导出</text>
 
   <rect x="720" y="263" width="184" height="205" rx="18" fill="#0e1a2c" stroke="#3c7898"/>
@@ -116,6 +116,6 @@
   <path d="M944 360 C985 360 998 360 1040 360" class="line-blue"/>
   <text x="966" y="344" class="small">API</text>
   <path d="M1040 430 C995 430 980 470 944 470" class="line-green"/>
-  <text x="965" y="464" class="small">候选</text>
+  <text x="965" y="464" class="small">模型</text>
   <path d="M706 614 L706 565" class="line-green"/>
 </svg>

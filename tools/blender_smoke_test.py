@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,12 +19,15 @@ import meshdock  # noqa: E402
 from meshdock.core.errors import ValidationError  # noqa: E402
 from meshdock.blender.runtime import get_runtime  # noqa: E402
 from meshdock.blender.properties import (  # noqa: E402
-    _generation_account_items, _provider_items, generation_topology_limits,
+    _candidate_items, _generation_account_items, _job_items, _provider_items,
+    generation_topology_limits,
 )
 
 
 def main() -> None:
+    staging_context = tempfile.TemporaryDirectory(prefix="meshdock-blender-smoke-")
     os.environ["MESHDOCK_DEV_MOCK"] = "1"
+    os.environ["MESHDOCK_STAGING"] = staging_context.name
     meshdock.register()
     try:
         service = get_runtime().service
@@ -125,7 +129,19 @@ def main() -> None:
             time.sleep(0.02)
             generated = service.get_job(created["id"])
         assert generated["state"] == "candidates_ready", generated
-        imported = service.import_candidate(created["id"], generated["candidates"][0]["id"])
+        props.last_job_id = created["id"]
+        job_items = _job_items(props, bpy.context)
+        assert job_items is _job_items(props, bpy.context)
+        assert any(item[0] == created["id"] for item in job_items)
+        candidate_items = _candidate_items(props, bpy.context)
+        assert candidate_items is _candidate_items(props, bpy.context)
+        assert candidate_items[0][0] == generated["candidates"][0]["id"]
+        assert candidate_items[0][4] == 0
+        assert props.candidate_id == generated["candidates"][0]["id"]
+        import_result = get_runtime().import_all_models(created["id"])
+        assert import_result["model_count"] == 2, import_result
+        assert import_result["layout"]["arranged"] == 2, import_result
+        imported = service.get_job(created["id"])
         assert imported["state"] == "candidate_imported", imported
         prepared = service.normalize_candidate(created["id"], generated["candidates"][0]["id"])
         assert prepared["prepared"] is True
@@ -141,6 +157,8 @@ def main() -> None:
     finally:
         meshdock.unregister()
         os.environ.pop("MESHDOCK_DEV_MOCK", None)
+        os.environ.pop("MESHDOCK_STAGING", None)
+        staging_context.cleanup()
 
 
 if __name__ == "__main__":

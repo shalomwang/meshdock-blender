@@ -200,8 +200,7 @@ class AI3D_OT_create_and_generate(bpy.types.Operator, _PipelineOperator):
             )
             props.last_job_id = job["id"]
             generated = service.generate_candidates(job["id"])
-            if generated["candidates"]:
-                props.candidate_id = generated["candidates"][0]["id"]
+            get_runtime().request_auto_import(job["id"])
             self.report({"INFO"}, f"Generation started: {generated['state']}")
             return {"FINISHED"}
         except Exception as exc:
@@ -396,8 +395,28 @@ class AI3D_OT_archive_job(bpy.types.Operator, _PipelineOperator):
 
     def execute(self, context):
         try:
-            get_runtime().service.archive_job(context.scene.meshdock.last_job_id)
-            self.report({"INFO"}, "Job archived")
+            props = context.scene.meshdock
+            service = get_runtime().service
+            service.archive_job(props.last_job_id)
+            remaining = service.list_jobs(limit=1)["jobs"]
+            props.last_job_id = remaining[0]["id"] if remaining else "__none__"
+            self.report({"INFO"}, "Job hidden; restore it from Job History")
+            return {"FINISHED"}
+        except Exception as exc:
+            return self.fail(exc)
+
+
+class AI3D_OT_restore_archived_job(bpy.types.Operator, _PipelineOperator):
+    bl_idname = "meshdock.restore_archived_job"
+    bl_label = "Restore Hidden Job"
+    bl_description = "Return a hidden job to the active job list without changing its files"
+
+    def execute(self, context):
+        props = context.scene.meshdock
+        try:
+            restored = get_runtime().service.restore_job(props.archived_job_id)
+            props.last_job_id = restored["id"]
+            self.report({"INFO"}, "Job restored")
             return {"FINISHED"}
         except Exception as exc:
             return self.fail(exc)
@@ -412,8 +431,51 @@ class AI3D_OT_import_candidate(bpy.types.Operator, _PipelineOperator):
     def execute(self, context):
         props = context.scene.meshdock
         try:
+            if props.last_job_id in {"", "__none__"}:
+                raise ValueError("Select a valid job before importing a candidate")
+            if props.candidate_id in {"", "__none__"}:
+                raise ValueError("Select a downloaded candidate before importing")
             job = get_runtime().service.import_candidate(props.last_job_id, props.candidate_id)
             self.report({"INFO"}, f"Imported {props.candidate_id} for job {job['id'][:8]}")
+            return {"FINISHED"}
+        except Exception as exc:
+            return self.fail(exc)
+
+
+class AI3D_OT_import_all_models(bpy.types.Operator, _PipelineOperator):
+    bl_idname = "meshdock.import_all_models"
+    bl_label = "Import All Models"
+    bl_description = "Import every generated model and arrange them with size-aware spacing"
+    bl_options = {"UNDO"}
+
+    def execute(self, context):
+        props = context.scene.meshdock
+        try:
+            if props.last_job_id in {"", "__none__"}:
+                raise ValueError("Select a valid job first")
+            result = get_runtime().import_all_models(props.last_job_id)
+            self.report({"INFO"}, f'Imported {result["model_count"]} generated model(s)')
+            return {"FINISHED"}
+        except Exception as exc:
+            return self.fail(exc)
+
+
+class AI3D_OT_open_candidate_folder(bpy.types.Operator, _PipelineOperator):
+    bl_idname = "meshdock.open_candidate_folder"
+    bl_label = "Open Candidate Folder"
+    bl_description = "Open the local folder where this candidate was downloaded"
+
+    def execute(self, context):
+        props = context.scene.meshdock
+        try:
+            if props.last_job_id in {"", "__none__"} or props.candidate_id in {"", "__none__"}:
+                raise ValueError("Select a downloaded candidate first")
+            model_path = get_runtime().service.candidate_local_path(
+                props.last_job_id, props.candidate_id
+            )
+            if not model_path.is_file():
+                raise ValueError("The downloaded candidate file is missing")
+            bpy.ops.wm.path_open(filepath=str(model_path.parent))
             return {"FINISHED"}
         except Exception as exc:
             return self.fail(exc)

@@ -130,7 +130,7 @@ class AssetPipelineService:
 
     def capabilities(self) -> dict[str, Any]:
         return {
-            "pipeline_version": "0.9.6",
+            "pipeline_version": "0.9.7",
             "preset_catalog": PRESET_CATALOG,
             "generation_presets": public_profiles(),
             "input_modes": ["text", "image", "multiview"],
@@ -211,7 +211,7 @@ class AssetPipelineService:
             ]
         value = {
             "schema": 1,
-            "pipeline_version": "0.9.6",
+            "pipeline_version": "0.9.7",
             "maintainer": "Shalom Wang",
             "platform": {"system": platform.system(), "release": platform.release(), "python": platform.python_version()},
             "providers": self.provider_status()["providers"],
@@ -565,6 +565,15 @@ class AssetPipelineService:
             job.archived = True
             job.events.append(self._event("job_archived", {}))
             self.staging.save_job(job)
+            return job.public_dict()
+
+    def restore_job(self, job_id: str) -> dict[str, Any]:
+        with self._lock:
+            job = self._get_job(job_id)
+            if job.archived:
+                job.archived = False
+                job.events.append(self._event("job_restored", {}))
+                self.staging.save_job(job)
             return job.public_dict()
 
     def resume_job(self, job_id: str) -> dict[str, Any]:

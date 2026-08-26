@@ -37,13 +37,14 @@ def main() -> None:
 
     try:
         initialized = request("initialize", {"protocolVersion": "2025-06-18"})
-        assert initialized["result"]["serverInfo"]["version"] == "0.9.6"
+        assert initialized["result"]["serverInfo"]["version"] == "0.9.7"
         listed = request("tools/list")
         names = {tool["name"] for tool in listed["result"]["tools"]}
         assert "select_candidate" not in names
         assert {
             "list_asset_jobs", "generate_candidates", "normalize_candidate",
             "export_selected_asset", "get_blender_task_status", "cancel_blender_task",
+            "restore_asset_job",
         } <= names
         create_tool = next(
             tool for tool in listed["result"]["tools"] if tool["name"] == "create_asset_job"

@@ -50,6 +50,8 @@ class BlenderPipelineRuntime:
         self._blender_tasks: dict[str, _BlenderTask] = {}
         self._blender_queue: deque[str] = deque()
         self._blender_task_lock = threading.RLock()
+        self._auto_import_jobs: set[str] = set()
+        self._auto_import_errors: dict[str, str] = {}
         tripo_cn = TripoAdapter(
             self.credentials, provider_id="tripo_cn",
             base_url="https://openapi.tripo3d.com/v3",
@@ -86,7 +88,7 @@ class BlenderPipelineRuntime:
         if os.environ.get("MESHDOCK_DEV_MOCK") == "1":
             providers["mock"] = MockProvider()
         from .scene_ops import (
-            activate_candidate_action, candidate_actions, delete_candidate_scene,
+            activate_candidate_action, arrange_candidate_collections, candidate_actions, delete_candidate_scene,
             export_reviewed_asset, import_candidate, prepare_game_asset, render_review_pack,
             set_candidate_visibility,
         )
@@ -103,6 +105,7 @@ class BlenderPipelineRuntime:
             action_activator=activate_candidate_action,
         )
         self.bridge = BlenderBridgeServer(self.dispatch)
+        self._arrange_candidate_collections = arrange_candidate_collections
 
     def dispatch(self, method: str, params: dict[str, Any]) -> Any:
         routes = {
@@ -137,6 +140,7 @@ class BlenderPipelineRuntime:
                 str(params.get("job_id", "")), str(params.get("candidate_id", ""))
             ),
             "archive_asset_job": lambda: self.service.archive_job(str(params.get("job_id", ""))),
+            "restore_asset_job": lambda: self.service.restore_job(str(params.get("job_id", ""))),
             "purge_archived_jobs": lambda: self.service.purge_archived_jobs(
                 int(params.get("older_than_days", 30))
             ),
@@ -283,6 +287,51 @@ class BlenderPipelineRuntime:
                     task.updated_at = utc_now()
             processed += 1
         return processed
+
+    def request_auto_import(self, job_id: str) -> None:
+        self._auto_import_errors.pop(job_id, None)
+        self._auto_import_jobs.add(job_id)
+
+    def auto_import_status(self, job_id: str) -> str:
+        if job_id in self._auto_import_errors:
+            return "failed"
+        if job_id in self._auto_import_jobs:
+            return "pending"
+        return "idle"
+
+    def import_all_models(self, job_id: str) -> dict[str, Any]:
+        import bpy
+
+        job = self.service._get_job(job_id)
+        imported_ids: list[str] = []
+        for candidate in job.candidates:
+            collection_exists = bool(
+                candidate.imported_collection
+                and bpy.data.collections.get(candidate.imported_collection) is not None
+            )
+            if not collection_exists:
+                self.service.import_candidate(job_id, candidate.id)
+            imported_ids.append(candidate.id)
+        layout = self._arrange_candidate_collections(job, imported_ids)
+        return {"job_id": job_id, "model_count": len(imported_ids), "layout": layout}
+
+    def drain_auto_imports(self) -> int:
+        completed = 0
+        for job_id in tuple(self._auto_import_jobs):
+            try:
+                status = self.service.get_job(job_id)
+                if status["state"] in {"failed", "cancelled"}:
+                    self._auto_import_jobs.discard(job_id)
+                    continue
+                if status["state"] not in {"candidates_ready", "candidate_imported"}:
+                    continue
+                self.import_all_models(job_id)
+                self._auto_import_jobs.discard(job_id)
+                completed += 1
+            except Exception as exc:
+                self._auto_import_jobs.discard(job_id)
+                self._auto_import_errors[job_id] = str(exc)
+        return completed
 
     def shutdown_blender_tasks(self) -> None:
         """Cancel work that has not entered Blender's main thread yet."""

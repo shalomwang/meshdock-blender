@@ -195,6 +195,12 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True},
     },
     {
+        "name": "restore_asset_job",
+        "description": "Return a hidden job to the default job list without changing its staged files.",
+        "inputSchema": _object_schema({"job_id": {"type": "string"}}, ["job_id"]),
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True},
+    },
+    {
         "name": "purge_archived_jobs",
         "description": "Permanently delete archived job staging directories older than the requested age.",
         "inputSchema": _object_schema(
@@ -367,7 +373,7 @@ class McpServer:
                 result = {
                     "protocolVersion": MCP_PROTOCOL_VERSION,
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "meshdock-blender", "version": "0.9.6"},
+                    "serverInfo": {"name": "meshdock-blender", "version": "0.9.7"},
                     "instructions": INSTRUCTIONS,
                 }
             elif method == "ping":

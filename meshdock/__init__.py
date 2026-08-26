@@ -5,14 +5,14 @@ from __future__ import annotations
 bl_info = {
     "name": "MeshDock",
     "author": "Shalom Wang",
-    "version": (0, 9, 6),
+    "version": (0, 9, 7),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > MeshDock",
     "description": "High-level AI asset jobs with Tripo, Hunyuan and TokenHub adapters",
     "category": "Import-Export",
 }
 
-__version__ = "0.9.6"
+__version__ = "0.9.7"
 
 
 def register() -> None:

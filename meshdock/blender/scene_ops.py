@@ -79,6 +79,47 @@ def import_candidate(job: AssetJob, candidate_id: str) -> str:
     return candidate_collection.name
 
 
+def arrange_candidate_collections(job: AssetJob, candidate_ids: list[str]) -> dict[str, Any]:
+    """Lay generated models out left-to-right with size-aware spacing."""
+    entries: list[tuple[bpy.types.Collection, list[bpy.types.Object], float, float]] = []
+    for candidate_id in candidate_ids:
+        candidate = _candidate(job, candidate_id)
+        collection = bpy.data.collections.get(candidate.imported_collection or "")
+        if collection is None:
+            continue
+        objects = list(collection.all_objects)
+        points = [
+            obj.matrix_world @ Vector(corner)
+            for obj in objects if hasattr(obj, "bound_box")
+            for corner in obj.bound_box
+        ]
+        if not points:
+            continue
+        minimum = min(point.x for point in points)
+        maximum = max(point.x for point in points)
+        entries.append((collection, objects, minimum, maximum))
+    if not entries:
+        return {"arranged": 0, "collections": []}
+
+    widest = max(maximum - minimum for _collection, _objects, minimum, maximum in entries)
+    gap = max(0.5, widest * 0.25)
+    cursor = 0.0
+    names: list[str] = []
+    for collection, objects, minimum, maximum in entries:
+        width = max(maximum - minimum, 0.01)
+        target_center = cursor + width / 2.0
+        offset = target_center - (minimum + maximum) / 2.0
+        object_set = set(objects)
+        roots = [obj for obj in objects if obj.parent not in object_set]
+        for obj in roots:
+            obj.matrix_world.translation.x += offset
+        collection["meshdock_layout_offset_x"] = offset
+        names.append(collection.name)
+        cursor += width + gap
+    bpy.context.view_layer.update()
+    return {"arranged": len(names), "collections": names, "gap": gap}
+
+
 def candidate_actions(job: AssetJob, candidate_id: str) -> list[str]:
     candidate = _candidate(job, candidate_id)
     collection = bpy.data.collections.get(candidate.imported_collection or "")

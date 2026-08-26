@@ -35,6 +35,16 @@ class StagingStore:
     def __init__(self, root: Path | None = None) -> None:
         self.root = (root or default_staging_root()).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        # Packaged Windows apps may virtualize AppData only when a file is
+        # actually written. Resolve a short-lived probe so containment checks
+        # use the true on-disk root rather than the pre-virtualization path.
+        if os.name == "nt":
+            probe = self.root / f".meshdock-root-{os.getpid()}"
+            try:
+                probe.write_bytes(b"")
+                self.root = probe.resolve().parent
+            finally:
+                probe.unlink(missing_ok=True)
 
     def job_dir(self, job_id: str) -> Path:
         if not _SAFE_ID.fullmatch(job_id):

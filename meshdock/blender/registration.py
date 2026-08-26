@@ -22,12 +22,15 @@ from .operators import (
     AI3D_OT_delete_credential_profile,
     AI3D_OT_export_reviewed_asset,
     AI3D_OT_import_candidate,
+    AI3D_OT_import_all_models,
+    AI3D_OT_open_candidate_folder,
     AI3D_OT_prepare_game_asset,
     AI3D_OT_preview_character_action,
     AI3D_OT_process_candidate,
     AI3D_OT_purge_archived_jobs,
     AI3D_OT_reject_candidate,
     AI3D_OT_render_review_pack,
+    AI3D_OT_restore_archived_job,
     AI3D_OT_remove_reference_image,
     AI3D_OT_resume_job,
     AI3D_OT_resume_process,
@@ -75,8 +78,11 @@ CLASSES = (
     AI3D_OT_unpause_job,
     AI3D_OT_update_job_priority,
     AI3D_OT_archive_job,
+    AI3D_OT_restore_archived_job,
     AI3D_OT_create_and_generate,
     AI3D_OT_import_candidate,
+    AI3D_OT_import_all_models,
+    AI3D_OT_open_candidate_folder,
     AI3D_OT_prepare_game_asset,
     AI3D_OT_approve_candidate,
     AI3D_OT_resume_job,
@@ -96,6 +102,7 @@ def _drain_bridge() -> float:
         runtime = get_runtime()
         runtime.bridge.drain_on_main_thread()
         runtime.drain_blender_tasks()
+        runtime.drain_auto_imports()
         for window in bpy.context.window_manager.windows:
             for area in window.screen.areas:
                 if area.type == "VIEW_3D":

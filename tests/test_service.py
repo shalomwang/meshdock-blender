@@ -46,3 +46,18 @@ def test_candidate_count_defaults_to_one() -> None:
     assert AssetSpec.from_dict({
         "asset_name": "single_default", "prompt": "one default candidate",
     }).candidate_count == 1
+
+
+def test_archived_job_can_be_restored(tmp_path: Path) -> None:
+    service = AssetPipelineService({"mock": MockProvider()}, StagingStore(tmp_path))
+    created = service.create_job({
+        "asset_name": "restorable_crate", "prompt": "crate", "provider": "mock",
+    })
+
+    archived = service.archive_job(created["id"])
+    assert archived["archived"] is True
+    assert service.list_jobs()["jobs"] == []
+
+    restored = service.restore_job(created["id"])
+    assert restored["archived"] is False
+    assert service.list_jobs()["jobs"][0]["id"] == created["id"]
