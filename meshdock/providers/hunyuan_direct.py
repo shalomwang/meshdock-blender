@@ -371,6 +371,8 @@ class HunyuanDirectAdapter(ProviderAdapter):
         return [latest[item] for item in task_ids]
 
     def _download_completed(self, job, destination, tasks, completed, progress):
+        if callable(getattr(progress, "stage", None)):
+            progress.stage("downloading")
         options = job.spec.advanced.get(self.option_namespace, {})
         requested = normalize_format(options.get("result_format")) or "glb"
         supported = {"glb", "gltf", "fbx", "obj", "stl", "usdz"}

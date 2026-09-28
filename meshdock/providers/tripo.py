@@ -366,6 +366,8 @@ class TripoAdapter(ProviderAdapter):
         return self._download_completed(job, destination, tasks, completed, progress)
 
     def _download_completed(self, job, destination, tasks, completed, progress):
+        if callable(getattr(progress, "stage", None)):
+            progress.stage("downloading")
         candidates: list[Candidate] = []
         preferred = "fbx" if job.spec.advanced.get(self.option_namespace, {}).get("quad") else None
         for index, task in enumerate(completed, start=1):

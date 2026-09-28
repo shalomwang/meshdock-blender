@@ -498,7 +498,7 @@ def _generation_account_items(self, _context):
                 if not profile["enabled"]:
                     continue
                 profile_id = str(profile["id"])
-                note = str(profile["note"]).strip() or f'{iface_("Profile")} {index}'
+                note = str(profile["note"]).strip() or f'{iface_("Account")} {index}'
                 provider_label = iface_(_PROVIDER_LABELS[provider])
                 source = iface_(source_labels.get(str(profile["source"]), "Available"))
                 identifier = f"{provider}|{profile_id}"
@@ -594,7 +594,7 @@ def _credential_items(self, provider: str):
         for index, item in enumerate(profiles, start=1):
             if not item["enabled"]:
                 continue
-            label = str(item["note"]) or f"Profile {index}"
+            label = str(item["note"]) or f'{iface_("Account")} {index}'
             source = source_labels.get(str(item["source"]), "Available")
             items.append(_enum_item(str(item["id"]), label, source))
         return _cached_enum_items(("accounts", provider, signature), items)
@@ -638,6 +638,23 @@ def _account_updated(self, _context):
                 pass
 
 
+def active_references(self):
+    """Keep drafts intact when changing models; submit only compatible references."""
+    rule=generation_constraints(self).get('constraints',{}).get(self.input_mode,{})
+    result=[];total=0
+    ordered=sorted(self.reference_images,key=lambda r:r.view not in rule.get('required_views',[]))
+    for ref in ordered:
+        if ref.view not in rule.get('allowed_views',[]): continue
+        if ref.format not in rule.get('formats',[]): continue
+        if rule.get('min_dimension') and min(ref.width,ref.height)<rule['min_dimension']: continue
+        if rule.get('max_dimension') and max(ref.width,ref.height)>rule['max_dimension']: continue
+        if rule.get('max_file_bytes') and ref.bytes>rule['max_file_bytes']: continue
+        if len(result)>=rule.get('max_images',0): continue
+        if rule.get('max_total_bytes') and total+ref.bytes>rule['max_total_bytes']: continue
+        result.append(ref);total+=ref.bytes
+    return result
+
+
 def _provider_input_updated(self, _context):
     identity = self.as_pointer()
     if identity in _INPUT_UPDATE_GUARD:
@@ -655,52 +672,35 @@ def _provider_input_updated(self, _context):
         if self.input_mode not in constraints["modes"]:
             return
         constraint = constraints["constraints"][self.input_mode]
-        allowed = set(constraint["allowed_views"])
-        formats = set(constraint["formats"])
-        for index in reversed(range(len(self.reference_images))):
-            item = self.reference_images[index]
-            invalid_dimension = (
-                (constraint["min_dimension"] and min(item.width, item.height) < constraint["min_dimension"])
-                or (constraint["max_dimension"] and max(item.width, item.height) > constraint["max_dimension"])
-            )
-            invalid_bytes = (
-                constraint.get("max_file_bytes", 0)
-                and item.bytes > constraint["max_file_bytes"]
-            )
-            if item.view not in allowed or item.format not in formats or invalid_dimension or invalid_bytes:
-                self.reference_images.remove(index)
-        maximum = int(constraint["max_images"])
-        required = set(constraint["required_views"])
-        while len(self.reference_images) > maximum:
-            removable = next(
-                (index for index in reversed(range(len(self.reference_images)))
-                 if self.reference_images[index].view not in required),
-                len(self.reference_images) - 1,
-            )
-            self.reference_images.remove(removable)
-        byte_limit = int(constraint["max_total_bytes"])
-        while byte_limit and sum(item.bytes for item in self.reference_images) > byte_limit:
-            removable = next(
-                (index for index in reversed(range(len(self.reference_images)))
-                 if self.reference_images[index].view not in required),
-                None,
-            )
-            if removable is None:
-                break
-            self.reference_images.remove(removable)
+        # Preserve user input. Only the compatible subset participates in submission.
     except Exception:
         return
     finally:
         _INPUT_UPDATE_GUARD.discard(identity)
 
 
+_CAPABILITY_CACHE={}
+
 def _process_capabilities(self) -> dict:
-    if not self.last_job_id or self.last_job_id == "__none__" or self.candidate_id == "__none__":
-        return {}
+    import time
+    obj=bpy.context.active_object
+    key=(bpy.context.scene.as_pointer(),obj.as_pointer() if obj else 0,bool(obj and obj.select_get()))
+    now=time.monotonic();cached=_CAPABILITY_CACHE.get(key)
+    if cached and now-cached[0]<.25: return cached[1]
+    result=_uncached_process_capabilities(self)
+    _CAPABILITY_CACHE.clear();_CAPABILITY_CACHE[key]=(now,result)
+    return result
+
+
+def _uncached_process_capabilities(self) -> dict:
     from .runtime import get_runtime
-    return get_runtime().service.available_process_operations(
-        self.last_job_id, self.candidate_id, "auto"
-    )["operations"]
+    from .process_target import generated_target, local_target
+    target=generated_target(bpy.context)
+    if target:
+        return get_runtime().service.available_process_operations(*target, "auto")["operations"]
+    if local_target(bpy.context):
+        return get_runtime().service.local_process_operations()["operations"]
+    return {}
 
 
 def _process_operation_items(self, _context):
@@ -729,7 +729,8 @@ def _process_provider_items(self, _context):
     try:
         providers = _process_capabilities(self).get(self.process_operation, {}).get("providers", [])
         items = [_enum_item("auto", "Auto", "Use a compatible provider")]
-        items.extend(_enum_item(item, item.title(), f"Use {item.title()}") for item in providers)
+        from .workflow import provider_label
+        items.extend(_enum_item(item, provider_label(item), provider_label(item)) for item in providers)
         return _cached_enum_items(("process_provider", *providers), items)
     except Exception:
         return _cached_enum_items(
@@ -776,13 +777,14 @@ def _sync_process_controls(self, defaults: dict) -> None:
 def effective_process_params(self) -> dict:
     """Merge the friendly process controls over expert JSON."""
     try:
-        value = json.loads(self.process_json or "{}")
+        value = json.loads(self.process_json or "{}") if self.show_advanced_process else {}
     except Exception as exc:
         raise ValueError("Process Options must be valid JSON") from exc
     if not isinstance(value, dict):
         raise ValueError("Process Options must be a JSON object")
     if self.process_operation != "retopology":
-        return value
+        from .workflow import friendly_params
+        return {**friendly_params(self), **value} if self.show_advanced_process else friendly_params(self)
     provider = selected_process_provider(self)
     if provider in TRIPO_PROVIDERS:
         value.update({
@@ -845,6 +847,10 @@ def _job_items(_self, _context):
     try:
         from .runtime import get_runtime
         jobs = get_runtime().service.list_jobs(limit=100)["jobs"]
+        selected=getattr(_self,'selected_job_key','')
+        if selected and selected!='__none__' and not any(j['id']==selected for j in jobs):
+            try: jobs.insert(0,get_runtime().service.get_job(selected))
+            except Exception: pass
         if jobs:
             signature = tuple(
                 (
@@ -953,6 +959,7 @@ def _action_items(self, _context):
 
 
 class AI3D_PG_reference_image(bpy.types.PropertyGroup):
+    preview_image: PointerProperty(type=bpy.types.Image)
     reference_id: StringProperty(name="Reference ID", options={"HIDDEN"})
     view: StringProperty(name="View")
     filename: StringProperty(name="File")
@@ -964,8 +971,31 @@ class AI3D_PG_reference_image(bpy.types.PropertyGroup):
 
 
 class AI3D_PG_asset_pipeline(bpy.types.PropertyGroup):
+    workbench_tab: EnumProperty(
+        name="Workbench", items=[
+            ("CREATE", "Generate", "Create a model", "ADD", 0),
+            ("MODELS", "Models", "Review, process and export models", "OUTLINER_OB_MESH", 1),
+            ("TOOLS", "Tools", "Batch jobs and diagnostics", "TOOL_SETTINGS", 2),
+        ], default="CREATE",
+    )
+    selected_job_key: StringProperty(options={"HIDDEN"})
+    native_controls: BoolProperty(name="Native controls",default=False)
+    history_search: StringProperty(name="Search history", default="")
+    proc_prompt: StringProperty(name="Appearance", default="", maxlen=512)
+    proc_motion_prompt: StringProperty(name="Motion", default="", maxlen=128)
+    proc_pbr: BoolProperty(name="PBR", default=True)
+    proc_keep_uv: BoolProperty(name="Keep UV", default=False)
+    proc_quality: EnumProperty(name="Texture quality",items=[('standard','Standard',''),('detailed','Detailed',''),('extreme','Extreme','')],default='detailed')
+    proc_texture_size: EnumProperty(name="Texture size",items=[('1024','1024',''),('2048','2048',''),('4096','4096','')],default='2048')
+    proc_granularity: EnumProperty(name="Granularity",items=[('simple','Simple',''),('balanced','Balanced',''),('detailed','Detailed','')],default='balanced')
+    proc_format: EnumProperty(name="Output format",items=[('FBX','FBX',''),('STL','STL',''),('USDZ','USDZ','')],default='FBX')
+    proc_staged: BoolProperty(name="Staged generation",default=False)
+    proc_post: BoolProperty(name="Post-process",default=False)
+    proc_animation: EnumProperty(name="Motion preset",items=[('preset:idle','Idle',''),('preset:walk','Walk',''),('preset:run','Run','')],default='preset:idle')
+    proc_in_place: BoolProperty(name="In place",default=False)
+    proc_duration: IntProperty(name="Duration",default=5,min=1,max=12)
     asset_name: StringProperty(name="Asset Name", default="sample_prop", maxlen=64)
-    prompt: StringProperty(name="Prompt", default="A clean stylized game prop", maxlen=4000)
+    prompt: StringProperty(name="Prompt", default="", maxlen=4000)
     input_mode: EnumProperty(
         name="Generation Method",
         items=[(mode, *label) for mode, label in _MODE_LABELS.items()],

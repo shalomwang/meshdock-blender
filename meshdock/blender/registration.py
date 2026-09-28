@@ -49,6 +49,11 @@ from .properties import (
 )
 from .runtime import get_runtime, start_runtime, stop_runtime
 from .translations import register_translations, unregister_translations
+from .workspace import CLASSES as WORKSPACE_CLASSES
+from .workbench_controls import CLASSES as CONTROL_CLASSES
+from .account_checks import CLASSES as ACCOUNT_CLASSES
+from .task_controls import CLASSES as TASK_CLASSES
+from . import workbench
 
 CLASSES = (
     AI3D_PG_reference_image,
@@ -89,11 +94,12 @@ CLASSES = (
     AI3D_OT_retry_job,
     AI3D_OT_regenerate_candidate,
     AI3D_OT_export_reviewed_asset,
+    *WORKSPACE_CLASSES,
+    *CONTROL_CLASSES,
+    *TASK_CLASSES,
+    *ACCOUNT_CLASSES,
+    *workbench.CLASSES,
     AI3D_PT_asset_pipeline,
-    AI3D_PT_candidate_review,
-    AI3D_PT_processing,
-    AI3D_PT_character_preview,
-    AI3D_PT_pipeline_tools,
 )
 
 
@@ -103,6 +109,7 @@ def _drain_bridge() -> float:
         runtime.bridge.drain_on_main_thread()
         runtime.drain_blender_tasks()
         runtime.drain_auto_imports()
+        workbench.ensure_controllers()
         for window in bpy.context.window_manager.windows:
             for area in window.screen.areas:
                 if area.type == "VIEW_3D":
@@ -112,19 +119,29 @@ def _drain_bridge() -> float:
     return 0.1
 
 
+def _restore_scene_tasks():
+    get_runtime().restore_scene_tasks()
+    return None
+
+
 def register() -> None:
     register_translations()
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     register_properties()
     start_runtime()
+    bpy.app.timers.register(_restore_scene_tasks, first_interval=0.1)
+    workbench.start()
     if not bpy.app.timers.is_registered(_drain_bridge):
         bpy.app.timers.register(_drain_bridge, first_interval=0.1, persistent=True)
 
 
 def unregister() -> None:
+    if bpy.app.timers.is_registered(_restore_scene_tasks):
+        bpy.app.timers.unregister(_restore_scene_tasks)
     if bpy.app.timers.is_registered(_drain_bridge):
         bpy.app.timers.unregister(_drain_bridge)
+    workbench.stop()
     stop_runtime()
     unregister_properties()
     for cls in reversed(CLASSES):

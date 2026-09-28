@@ -11,6 +11,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
+from .. import __version__
 
 from ..providers.base import ProviderAdapter
 from .errors import (
@@ -130,7 +131,7 @@ class AssetPipelineService:
 
     def capabilities(self) -> dict[str, Any]:
         return {
-            "pipeline_version": "0.9.7",
+            "pipeline_version": __version__,
             "preset_catalog": PRESET_CATALOG,
             "generation_presets": public_profiles(),
             "input_modes": ["text", "image", "multiview"],
@@ -211,7 +212,7 @@ class AssetPipelineService:
             ]
         value = {
             "schema": 1,
-            "pipeline_version": "0.9.7",
+            "pipeline_version": __version__,
             "maintainer": "Shalom Wang",
             "platform": {"system": platform.system(), "release": platform.release(), "python": platform.python_version()},
             "providers": self.provider_status()["providers"],
@@ -279,51 +280,89 @@ class AssetPipelineService:
         with self._lock:
             job = self._get_job(job_id)
             candidate = self._get_candidate(job, candidate_id)
-            requested = str(canonical_provider_id(provider.strip().lower()))
-            site_providers = self._regional_providers(candidate.provider)
-            provider_ids = (
-                [candidate.provider, *site_providers]
-                if requested == "auto" else [requested]
-            )
-            operations: dict[str, dict[str, Any]] = {}
-            resolved: list[str] = []
-            for provider_id in provider_ids:
-                if provider_id in resolved:
-                    continue
-                adapter = self.providers.get(provider_id)
-                if adapter is None or not adapter.status().available:
-                    continue
-                if provider_family(adapter.id) == "tokenhub" and (
-                    candidate.provider != adapter.id
-                    or not str(candidate.metadata.get("provider_model", "")).startswith("hy-3d-")
+            result = self._candidate_process_operations(candidate, provider)
+            return {"job_id": job.id, **result}
+
+    def local_process_operations(self, provider: str = "auto") -> dict[str, Any]:
+        """Capabilities for a GLB snapshot; does not stage or submit anything."""
+        candidate = Candidate(id="local_source", provider="local", label="Scene model",
+                              local_model_path="", format="glb")
+        return self._candidate_process_operations(candidate, provider)
+
+    def _candidate_process_operations(self, candidate: Candidate, provider: str) -> dict[str, Any]:
+        requested = str(canonical_provider_id(provider.strip().lower()))
+        site_providers = self._regional_providers(candidate.provider)
+        provider_ids = (
+            [candidate.provider, *site_providers]
+            if requested == "auto" else [requested]
+        )
+        operations: dict[str, dict[str, Any]] = {}
+        resolved: list[str] = []
+        for provider_id in provider_ids:
+            if provider_id in resolved:
+                continue
+            adapter = self.providers.get(provider_id)
+            if adapter is None or not adapter.status().available:
+                continue
+            if provider_family(adapter.id) == "tokenhub" and (
+                candidate.provider != adapter.id
+                or not str(candidate.metadata.get("provider_model", "")).startswith("hy-3d-")
+            ):
+                continue
+            resolved.append(adapter.id)
+            capabilities = adapter.capabilities()
+            for operation in capabilities.postprocess:
+                schema = dict(capabilities.process_schema.get(operation, {}))
+                source_formats = schema.get("source_formats")
+                has_native_task = (
+                    candidate.provider == adapter.id
+                    and isinstance(candidate.metadata.get("provider_task_id"), str)
+                )
+                if (
+                    source_formats and candidate.format.lower() not in source_formats
+                    and not (provider_family(adapter.id) == "tripo" and has_native_task)
                 ):
                     continue
-                resolved.append(adapter.id)
-                capabilities = adapter.capabilities()
-                for operation in capabilities.postprocess:
-                    schema = dict(capabilities.process_schema.get(operation, {}))
-                    source_formats = schema.get("source_formats")
-                    has_native_task = (
-                        candidate.provider == adapter.id
-                        and isinstance(candidate.metadata.get("provider_task_id"), str)
-                    )
-                    if (
-                        source_formats and candidate.format.lower() not in source_formats
-                        and not (provider_family(adapter.id) == "tripo" and has_native_task)
-                    ):
-                        continue
-                    if (
-                        operation == "animate"
-                        and candidate.metadata.get("process_operation") != "rig"
-                    ):
-                        continue
-                    operations.setdefault(operation, {"providers": [], **schema})
-                    operations[operation]["providers"].append(adapter.id)
-            return {
-                "job_id": job.id, "candidate_id": candidate.id,
-                "requested_provider": requested, "resolved_providers": resolved,
-                "operations": operations,
-            }
+                if (
+                    operation == "animate"
+                    and candidate.metadata.get("process_operation") != "rig"
+                ):
+                    continue
+                operations.setdefault(operation, {"providers": [], **schema})
+                operations[operation]["providers"].append(adapter.id)
+        return {
+            "candidate_id": candidate.id,
+            "requested_provider": requested, "resolved_providers": resolved,
+            "operations": operations,
+        }
+
+    def register_local_model(self, source: Path, label: str, *, max_estimated_credits: float = 0.0) -> dict[str, Any]:
+        """Persist an immutable scene snapshot as a processing source, never a generation request."""
+        source = Path(source)
+        if source.suffix.lower() != ".glb" or not source.is_file():
+            raise ValidationError("a local processing source must be a GLB file")
+        import struct
+        with source.open("rb") as stream:
+            header = stream.read(12)
+        if len(header) != 12 or header[:4] != b"glTF":
+            raise ValidationError("invalid GLB source")
+        version, length = struct.unpack("<II", header[4:])
+        if version != 2 or length != source.stat().st_size:
+            raise ValidationError("invalid GLB source length or version")
+        job = AssetJob(spec=AssetSpec(asset_name="scene_model", prompt="Local scene model processing",
+                                     max_estimated_credits=max_estimated_credits),
+                       state=JobState.CANDIDATES_READY, progress=1.0, phase="ready")
+        destination = self.staging.candidate_path(job.id, "scene_source.glb")
+        shutil.copy2(source, destination)
+        candidate = Candidate(id=uuid.uuid4().hex, provider="local", label=str(label)[:200],
+                              local_model_path=str(destination), format="glb",
+                              metadata={"local_scene_source": True, "source_name": str(label)[:200]})
+        job.candidates.append(candidate)
+        job.events.append(self._event("local_model_staged", {"candidate_id": candidate.id}))
+        with self._lock:
+            self.staging.save_job(job)
+            self._jobs[job.id] = job
+        return job.public_dict()
 
     def create_job(self, spec_value: dict[str, Any]) -> dict[str, Any]:
         spec = AssetSpec.from_dict(spec_value)
@@ -492,6 +531,41 @@ class AssetPipelineService:
             jobs.sort(key=lambda item: item.updated_at, reverse=True)
             return {"jobs": [job.public_dict() for job in jobs[:max(1, min(int(limit), 200))]]}
 
+    def find_candidate_collections(self, names: set[str]) -> list[tuple[str,str]]:
+        """Resolve scene ownership independently of history pagination, including archived jobs."""
+        with self._lock:
+            return [(job.id,c.id) for job in self._jobs.values() for c in job.candidates
+                    if c.imported_collection and c.imported_collection in names]
+
+    def history_records(self, query: str = '', offset: int = 0, limit: int = 6) -> dict[str, Any]:
+        with self._lock:
+            needle=query.strip().casefold();records=[]
+            jobs=sorted((j for j in self._jobs.values() if not j.archived),key=lambda j:j.updated_at,reverse=True)
+            for job in jobs:
+                for index,candidate in enumerate(job.candidates):
+                    if candidate.metadata.get('local_scene_source'): continue
+                    haystack=' '.join([job.spec.asset_name,job.spec.prompt,candidate.label,candidate.provider,str(candidate.metadata.get('process_operation',''))])
+                    if not needle or needle in haystack.casefold(): records.append((job,candidate,index))
+            selected=records[max(0,offset):max(0,offset)+max(1,min(50,limit))]
+            return {'records':[{'job':j.public_dict(),'candidate':c.public_dict(),'index':i} for j,c,i in selected],'total':len(records)}
+
+    def scene_attention_job(self, job_ids) -> dict[str, Any] | None:
+        with self._lock:
+            jobs=[self._jobs[key] for key in job_ids if key in self._jobs]
+            active={'queued','submitted','processing','recovery_pending'}
+            jobs=[j for j in jobs if j.state.value in active or any(t.state.value in active for t in j.process_tasks)]
+            return max(jobs,key=lambda j:j.updated_at).public_dict() if jobs else None
+
+    def history_page(self, query: str = '', offset: int = 0, limit: int = 40) -> dict[str, Any]:
+        with self._lock:
+            jobs=[j for j in self._jobs.values() if not j.archived]
+            if query.strip():
+                needle=query.strip().casefold()
+                jobs=[j for j in jobs if needle in (j.spec.asset_name+' '+j.spec.prompt+' '+j.id+' '+
+                      ' '.join(c.label+' '+c.provider+' '+str(c.metadata.get('process_operation','')) for c in j.candidates)).casefold()]
+            jobs.sort(key=lambda j:j.updated_at,reverse=True)
+            return {'jobs':[j.public_dict() for j in jobs[max(0,offset):max(0,offset)+max(1,min(limit,200))]],'total':len(jobs)}
+
     def retry_job(self, job_id: str) -> dict[str, Any]:
         with self._lock:
             original = self._get_job(job_id)
@@ -579,7 +653,7 @@ class AssetPipelineService:
     def resume_job(self, job_id: str) -> dict[str, Any]:
         with self._lock:
             job = self._get_job(job_id)
-            if job.state != JobState.RECOVERY_PENDING or not job.active_provider:
+            if job.state != JobState.RECOVERY_PENDING or not job.active_provider or not job.provider_task_ids:
                 raise InvalidTransitionError("job has no provider task pending recovery")
             adapter = self.providers.get(job.active_provider)
             if adapter is None or not adapter.status().available:
@@ -809,6 +883,15 @@ class AssetPipelineService:
             self._process_workers[task.id] = worker
             worker.start()
             return task.public_dict()
+
+    def can_resume_task(self, job_id: str, task_id: str = "") -> bool:
+        """Expose recovery eligibility without leaking provider task identifiers."""
+        with self._lock:
+            job = self._get_job(job_id)
+            if task_id:
+                task = self._get_process_task(job, task_id)
+                return task.state == ProcessState.RECOVERY_PENDING and bool(task.provider_task_id)
+            return job.state == JobState.RECOVERY_PENDING and bool(job.active_provider and job.provider_task_ids)
 
     def get_process_status(self, job_id: str, task_id: str) -> dict[str, Any]:
         with self._lock:
@@ -1210,6 +1293,12 @@ class AssetPipelineService:
                 if not self._shutting_down and job.state == JobState.PROCESSING:
                     job.progress = min(max(0.1 + float(value) * 0.89, 0.1), 0.99)
                     self.staging.save_job(job)
+        def set_phase(phase: str) -> None:
+            with self._lock:
+                if not self._shutting_down and job.state == JobState.PROCESSING:
+                    job.phase = phase
+                    self.staging.save_job(job)
+        update_progress.stage = set_phase
         def task_submitted(key: str, provider_task_id: str) -> None:
             """Durably record each remote id before the adapter can continue."""
             with self._lock:
@@ -1267,6 +1356,7 @@ class AssetPipelineService:
                     job.transition(JobState.PROCESSING, kind="generation_processing")
                 job.progress = 0.1
                 self.staging.save_job(job)
+            set_phase("generating")
             action = adapter.resume if resume else adapter.generate
             candidates = action(
                 job,
@@ -1279,6 +1369,7 @@ class AssetPipelineService:
                 if job.state == JobState.CANCELLED:
                     return
                 job.candidates = candidates
+                job.phase = "ready"
                 credits = [item.metadata.get("credits_consumed") for item in candidates]
                 numeric_credits = [float(value) for value in credits if isinstance(value, (int, float))]
                 if numeric_credits:

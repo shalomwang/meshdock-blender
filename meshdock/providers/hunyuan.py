@@ -290,6 +290,8 @@ class TokenHubAdapter(ProviderAdapter):
         return self._download_completed(job, destination, tasks, completed, progress)
 
     def _download_completed(self, job, destination, tasks, completed, progress):
+        if callable(getattr(progress, "stage", None)):
+            progress.stage("downloading")
         candidates: list[Candidate] = []
         model = str(job.spec.advanced.get(self.option_namespace, {}).get("model", self.default_model))
         if model in self._TRIPO_MODELS:

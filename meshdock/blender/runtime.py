@@ -51,6 +51,8 @@ class BlenderPipelineRuntime:
         self._blender_queue: deque[str] = deque()
         self._blender_task_lock = threading.RLock()
         self._auto_import_jobs: set[str] = set()
+        self._auto_process_results: dict[str,str] = {}
+        self._preview_job_ids: set[str] = set()
         self._auto_import_errors: dict[str, str] = {}
         tripo_cn = TripoAdapter(
             self.credentials, provider_id="tripo_cn",
@@ -289,6 +291,9 @@ class BlenderPipelineRuntime:
         return processed
 
     def request_auto_import(self, job_id: str) -> None:
+        from .workbench_preview import scene_for_job
+        scene=scene_for_job(job_id)
+        if scene: scene['meshdock_pending_imports']=list(dict.fromkeys([*scene.get('meshdock_pending_imports',[]),job_id]))
         self._auto_import_errors.pop(job_id, None)
         self._auto_import_jobs.add(job_id)
 
@@ -299,24 +304,96 @@ class BlenderPipelineRuntime:
             return "pending"
         return "idle"
 
-    def import_all_models(self, job_id: str) -> dict[str, Any]:
+    def import_all_models(self,job_id: str) -> dict[str,Any]:
+        import bpy
+        from .process_target import preserve_window_context
+        with preserve_window_context(bpy.context):
+            return self._import_all_models(job_id)
+
+    def _import_all_models(self, job_id: str) -> dict[str, Any]:
         import bpy
 
+        from .workbench_preview import scene_for_job
+        target = scene_for_job(job_id)
+        if target is None and job_id in self._preview_job_ids:
+            raise ValidationError("The generation destination is not in this file; reopen the original file")
+        if target is not None and bpy.context.scene != target:
+            with bpy.context.temp_override(scene=target, view_layer=target.view_layers[0]):
+                return self.import_all_models(job_id)
         job = self.service._get_job(job_id)
         imported_ids: list[str] = []
+        new_ids: list[str] = []
         for candidate in job.candidates:
+            if candidate.metadata.get("local_scene_source"): continue
             collection_exists = bool(
                 candidate.imported_collection
                 and bpy.data.collections.get(candidate.imported_collection) is not None
             )
             if not collection_exists:
                 self.service.import_candidate(job_id, candidate.id)
+                new_ids.append(candidate.id)
             imported_ids.append(candidate.id)
-        layout = self._arrange_candidate_collections(job, imported_ids)
+        layout = self._arrange_candidate_collections(job, new_ids) if new_ids else {}
+        from .process_target import capture_baseline
+        for candidate_id in new_ids:
+            collection_name=self.service._get_candidate(job,candidate_id).imported_collection
+            collection=bpy.data.collections.get(collection_name or '')
+            if collection: capture_baseline(bpy.context,collection)
         return {"job_id": job_id, "model_count": len(imported_ids), "layout": layout}
 
+    def request_process_result(self, job_id: str, task_id: str) -> None:
+        self._auto_process_results[task_id]=job_id
+
+    def drain_process_results(self) -> int:
+        import bpy
+        from .workbench_preview import scene_for_job, request_thumbnail
+        from .process_target import preserve_window_context
+        completed=0
+        for task_id,job_id in tuple(self._auto_process_results.items()):
+            try:
+                task=self.service.get_process_status(job_id,task_id)
+                if task['state'] in {'failed','cancelled'}:
+                    self._auto_process_results.pop(task_id,None);continue
+                if task['state']!='completed': continue
+                target=next((s for s in bpy.data.scenes if task_id in s.get('meshdock_process_tasks',[])),None)
+                target=target or scene_for_job(job_id)
+                if target is None: raise ValidationError('Reopen the scene that submitted this processing task')
+                if task_id not in target.get('meshdock_imported_processes',[]):
+                    candidate_id=task.get('result_candidate_id')
+                    if candidate_id:
+                        candidate=self.service._get_candidate(self.service._get_job(job_id),candidate_id)
+                        if not candidate.imported_collection or bpy.data.collections.get(candidate.imported_collection) is None:
+                            with preserve_window_context(bpy.context), bpy.context.temp_override(scene=target,view_layer=target.view_layers[0]):
+                                self.service.import_candidate(job_id,candidate_id)
+                                from .process_target import capture_baseline
+                                collection=bpy.data.collections.get(candidate.imported_collection or '')
+                                if collection: capture_baseline(bpy.context,collection)
+                        request_thumbnail(job_id,candidate_id)
+                    target['meshdock_imported_processes']=list(dict.fromkeys([*target.get('meshdock_imported_processes',[]),task_id]))
+                self._auto_process_results.pop(task_id,None);completed+=1
+            except Exception as exc:
+                self._auto_import_errors[task_id]=str(exc)
+                self._auto_process_results.pop(task_id,None)
+        return completed
+
+    def restore_scene_tasks(self):
+        import bpy
+        for scene in bpy.data.scenes:
+            for job_id in scene.get('meshdock_jobs',[]):
+                try: job=self.service.get_job(job_id)
+                except Exception: continue
+                self._preview_job_ids.add(job_id)
+                if job_id in scene.get('meshdock_pending_imports',[]): self._auto_import_jobs.add(job_id)
+                imported=set(scene.get('meshdock_imported_processes',[]))
+                for task in job.get('process_tasks',[]):
+                    if task['id'] in scene.get('meshdock_process_tasks',[]) and task['id'] not in imported:
+                        self.request_process_result(job_id,task['id'])
+
     def drain_auto_imports(self) -> int:
-        completed = 0
+        import bpy
+        if bpy.context.mode != "OBJECT":
+            return 0  # Do not merge arriving geometry into a mesh the user is editing.
+        completed = self.drain_process_results()
         for job_id in tuple(self._auto_import_jobs):
             try:
                 status = self.service.get_job(job_id)
@@ -326,6 +403,9 @@ class BlenderPipelineRuntime:
                 if status["state"] not in {"candidates_ready", "candidate_imported"}:
                     continue
                 self.import_all_models(job_id)
+                from .workbench_preview import scene_for_job
+                scene=scene_for_job(job_id)
+                if scene: scene['meshdock_pending_imports']=[i for i in scene.get('meshdock_pending_imports',[]) if i!=job_id]
                 self._auto_import_jobs.discard(job_id)
                 completed += 1
             except Exception as exc:

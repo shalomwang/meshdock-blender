@@ -22,12 +22,15 @@ _STATE_LABELS = {
 class _PipelinePanel:
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "MeshDock"
+    bl_category = "Mesh Dock"
 
 
 def _draw_references(layout, props) -> None:
     references = layout.box()
     references.label(text="Reference Images")
+    if props.input_mode == "text":
+        references.label(text="Choose image input to add references.", icon="INFO")
+        return
     try:
         constraint = generation_constraints(props)["constraints"][props.input_mode]
         views = constraint["allowed_views"]
@@ -52,13 +55,22 @@ def _draw_references(layout, props) -> None:
         )
         operator.view = view
     for index, item in enumerate(props.reference_images):
-        row = references.row(align=True)
+        card = references.box()
+        if item.preview_image:
+            preview = item.preview_image.preview
+            if preview and preview.icon_id:
+                card.template_icon(icon_value=preview.icon_id, scale=5)
+        row = card.row(align=True)
         row.label(
             text=f"{item.view}: {item.filename} ({item.dimensions}, {item.format.upper()})",
             icon="IMAGE_DATA",
         )
         remove = row.operator("meshdock.remove_reference_image", text="", icon="X")
         remove.index = index
+        button = card.operator("meshdock.preview_reference", text="Preview Reference", icon="ZOOM_IN")
+        button.index = index
+    if not props.reference_images:
+        references.label(text="Choose a view above to add an image.", icon="IMAGE_DATA")
 
 
 def _draw_provider_options(layout, props, provider: str) -> None:
@@ -138,7 +150,7 @@ def _draw_active_job(layout, props, runtime) -> None:
     try:
         status = runtime.service.get_job(props.last_job_id)
         state = iface_(_STATE_LABELS.get(status["state"], status["state"]))
-        current.label(text=f'{state} · {status["progress"] * 100:.0f}%')
+        current.progress(factor=max(0.0, min(1.0, status["progress"])), type="BAR", text=state)
         if status["state"] in {"queued", "submitted", "processing"}:
             controls = current.row(align=True)
             if status.get("paused"):
@@ -164,7 +176,7 @@ def _draw_active_job(layout, props, runtime) -> None:
 
 
 class AI3D_PT_asset_pipeline(_PipelinePanel, bpy.types.Panel):
-    bl_label = "MeshDock"
+    bl_label = "Mesh Dock"
     bl_idname = "AI3D_PT_asset_pipeline"
 
     def draw(self, context):
@@ -172,79 +184,40 @@ class AI3D_PT_asset_pipeline(_PipelinePanel, bpy.types.Panel):
         props = context.scene.meshdock
         runtime = get_runtime()
 
-        profiles = [
-            profile
-            for provider in (*TRIPO_PROVIDERS, HUNYUAN_DIRECT, *TOKENHUB_PROVIDERS)
-            for profile in runtime.credentials.list_profiles(provider)
-        ]
-        account_count = len(profiles)
-        enabled_count = sum(bool(profile["enabled"]) for profile in profiles)
-        accounts = layout.row(align=True)
-        accounts.label(
-            text=f'{enabled_count}/{account_count} {iface_("accounts enabled")}',
-            icon="CHECKMARK" if enabled_count else "LOCKED",
-        )
-        accounts.operator("meshdock.manage_credentials", text="Manage", icon="PREFERENCES")
-
-        create = layout.box()
-        create.label(text="Create 3D Asset", icon="OUTLINER_OB_MESH")
-        create.prop(props, "input_mode", expand=True)
-        create.prop(props, "generation_account")
-        if props.generation_account == "__none__":
-            create.label(text="Add a compatible account to continue.", icon="ERROR")
-            create.operator("meshdock.manage_credentials", text="Add Account", icon="ADD")
-            return
-        create.prop(props, "generation_model")
-        create.prop(
-            props, "prompt",
-            text="Prompt" if props.input_mode == "text" else "Guidance (optional)",
-        )
-        if props.input_mode != "text":
-            _draw_references(create, props)
-        create.prop(props, "candidate_count", text="Quantity")
-        disclosure = create.row()
-        disclosure.prop(
-            props, "show_generation_settings", text="Quality & Cost",
-            icon="DISCLOSURE_TRI_DOWN" if props.show_generation_settings else "DISCLOSURE_TRI_RIGHT",
-            emboss=False,
-        )
-        if props.show_generation_settings:
-            settings = create.box()
-            provider, _profile_id = selected_generation_account(props)
-            _draw_provider_options(settings, props, provider)
-            settings.prop(props, "asset_name", text="Asset ID")
-            settings.prop(props, "asset_profile")
-            settings.prop(props, "priority")
-            settings.prop(props, "max_estimated_credits")
-            if props.max_estimated_credits > 0:
-                settings.prop(props, "allow_over_budget")
-            settings.prop(
-                props, "show_advanced_generation",
-                icon="DISCLOSURE_TRI_DOWN" if props.show_advanced_generation else "DISCLOSURE_TRI_RIGHT",
-            )
-            if props.show_advanced_generation:
-                settings.prop(props, "advanced_json", text="Extra Options (JSON)")
-        action = create.row(align=True)
-        action.operator("meshdock.create_and_generate", text="Generate", icon="ADD")
-        try:
-            estimate = generation_cost_estimate(props)
-        except Exception:
-            estimate = None
-        if estimate is not None:
-            cost = action.row(align=True)
-            cost.alert = (
-                props.max_estimated_credits > 0
-                and estimate > props.max_estimated_credits
-                and not props.allow_over_budget
-            )
-            if estimate == 0:
-                cost.label(text=iface_("Free"), icon="INFO")
+        if context.workspace.name != "AI":
+            entry = layout.row()
+            entry.scale_y = 1.4
+            entry.operator("meshdock.open_ai_workspace", icon="WORKSPACE")
+        layout.operator("meshdock.manage_credentials", text="Manage Accounts", icon="PREFERENCES")
+        layout.prop(props,'native_controls',text='原生控件 / Native controls')
+        if props.native_controls:
+            layout.prop(props,'workbench_tab',expand=True)
+            if props.workbench_tab=='CREATE':
+                layout.prop(props,'generation_account');layout.prop(props,'generation_model')
+                layout.prop(props,'input_mode',expand=True)
+                if props.input_mode=='text': layout.prop(props,'prompt')
+                else: _draw_references(layout,props)
+                _draw_provider_options(layout,props,selected_generation_account(props)[0])
+                layout.prop(props,'candidate_count')
+                layout.operator('meshdock.workbench_generate',text='生成 / Generate')
+            elif props.workbench_tab=='MODELS':
+                from .workflow import process_fields,process_blocker,target_summary
+                layout.label(text=target_summary(context))
+                layout.prop(props,'process_operation');layout.prop(props,'process_provider')
+                if props.process_operation=='retopology':
+                    names=('process_face_limit','process_quad','process_bake') if selected_process_provider(props) in TRIPO_PROVIDERS else ('process_face_level','process_polygon_type')
+                    for name in names: layout.prop(props,name)
+                else:
+                    for name,label in process_fields(props): layout.prop(props,name,text=label)
+                blocker=process_blocker(context,props)
+                if blocker: layout.label(text=blocker,icon='INFO')
+                row=layout.row();row.enabled=not blocker;row.operator('meshdock.process_candidate')
+                layout.prop(props,'action_name')
+                row=layout.row();row.enabled=props.action_name not in ('','__none__');row.operator('meshdock.preview_character_action')
             else:
-                cost.label(
-                    text=f'{iface_("Estimated")} {estimate:g} {iface_("credits")}',
-                    icon="INFO",
-                )
-        _draw_active_job(layout, props, runtime)
+                layout.prop(props,'last_job_id');layout.prop(props,'candidate_id')
+                layout.operator('meshdock.export_reviewed_asset')
+        return
 
 
 class AI3D_PT_candidate_review(_PipelinePanel, bpy.types.Panel):
@@ -252,9 +225,16 @@ class AI3D_PT_candidate_review(_PipelinePanel, bpy.types.Panel):
     bl_idname = "AI3D_PT_candidate_review"
     bl_parent_id = "AI3D_PT_asset_pipeline"
 
+    @classmethod
+    def poll(cls, context):
+        return context.scene.meshdock.workbench_tab == "MODELS"
+
     def draw(self, context):
         layout = self.layout
         props = context.scene.meshdock
+        if props.last_job_id in {"", "__none__"}:
+            layout.label(text="Generate a model to see your results here.", icon="INFO")
+            return
         layout.prop(props, "candidate_id", text="Model")
         row = layout.row(align=True)
         row.enabled = props.last_job_id not in {"", "__none__"}
@@ -265,6 +245,29 @@ class AI3D_PT_candidate_review(_PipelinePanel, bpy.types.Panel):
         row.operator("meshdock.prepare_game_asset", text="Normalize", icon="MODIFIER")
         row.operator("meshdock.show_candidate", text="Show Model", icon="HIDE_OFF")
         row.operator("meshdock.show_all_candidates", text="Show All", icon="RESTRICT_VIEW_OFF")
+        viewport = layout.box()
+        viewport.label(text="Model Preview", icon="SHADING_SOLID")
+        viewport.prop(context.space_data.shading, "type", expand=True)
+        viewport.prop(context.space_data.overlay, "show_wireframes", text="Wireframe")
+        viewport.prop(context.space_data.overlay, "show_stats", text="Statistics")
+        export = layout.box()
+        export.label(text="Export", icon="EXPORT")
+        export.prop(props, "export_format", text="Format")
+        export.prop(props, "export_directory", text="Folder")
+        try:
+            job = get_runtime().service.get_job(props.last_job_id)
+            candidate = next((c for c in job["candidates"] if c["id"] == props.candidate_id), {})
+        except Exception:
+            job, candidate = {}, {}
+        confirm = export.row()
+        confirm.enabled = bool(candidate.get("imported"))
+        confirm.operator("meshdock.approve_candidate", text="Use This Model", icon="CHECKMARK")
+        action = export.row()
+        action.scale_y = 1.3
+        action.enabled = bool(candidate.get("imported")) and job.get("selected_candidate_id") == props.candidate_id
+        action.operator("meshdock.export_reviewed_asset", icon="EXPORT")
+        if not action.enabled:
+            export.label(text="Import and confirm this model before exporting.", icon="INFO")
 
 
 class AI3D_PT_processing(_PipelinePanel, bpy.types.Panel):
@@ -272,6 +275,10 @@ class AI3D_PT_processing(_PipelinePanel, bpy.types.Panel):
     bl_idname = "AI3D_PT_processing"
     bl_parent_id = "AI3D_PT_asset_pipeline"
     bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.meshdock.workbench_tab == "MODELS"
 
     def draw(self, context):
         layout = self.layout
@@ -330,6 +337,10 @@ class AI3D_PT_character_preview(_PipelinePanel, bpy.types.Panel):
     bl_parent_id = "AI3D_PT_asset_pipeline"
     bl_options = {"DEFAULT_CLOSED"}
 
+    @classmethod
+    def poll(cls, context):
+        return context.scene.meshdock.workbench_tab == "MODELS"
+
     def draw(self, context):
         props = context.scene.meshdock
         self.layout.prop(props, "action_name")
@@ -343,6 +354,10 @@ class AI3D_PT_pipeline_tools(_PipelinePanel, bpy.types.Panel):
     bl_idname = "AI3D_PT_pipeline_tools"
     bl_parent_id = "AI3D_PT_asset_pipeline"
     bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.meshdock.workbench_tab == "TOOLS"
 
     def draw(self, context):
         layout = self.layout

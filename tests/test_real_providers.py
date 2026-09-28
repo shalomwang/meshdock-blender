@@ -499,3 +499,109 @@ def test_hunyuan_retopology_rejects_invalid_provider_levels(tmp_path: Path) -> N
         adapter._process_payload(
             "retopology", {"polygon_type": "ngon"}, source_url, "glb", job
         )
+
+
+@pytest.mark.parametrize("family", ["tripo", "tokenhub", "direct"])
+def test_download_stage_is_reported_before_any_artifact_transfer(tmp_path, family):
+    class Progress:
+        phase = "generating"
+
+        def __call__(self, value):
+            pass
+
+        def stage(self, value):
+            self.phase = value
+
+    progress = Progress()
+    if family == "direct":
+        http = FakeDirectHunyuanHttp()
+        adapter = HunyuanDirectAdapter(FakeCredentials(), http, poll_interval=0)
+        job = _job(ProviderChoice.HUNYUAN_DIRECT, count=1)
+    elif family == "tokenhub":
+        http = FakeHttp("hunyuan")
+        adapter = TokenHubAdapter(FakeCredentials(), http, poll_interval=0)
+        job = _job(ProviderChoice.TOKENHUB_CN, count=1)
+    else:
+        http = FakeHttp("tripo")
+        adapter = TripoAdapter(FakeCredentials(), http, poll_interval=0)
+        job = _job(ProviderChoice.TRIPO, count=1)
+    download = http.download
+    transferred = []
+
+    def checked_download(*args, **kwargs):
+        assert progress.phase == "downloading"
+        transferred.append(True)
+        return download(*args, **kwargs)
+
+    http.download = checked_download
+    adapter.generate(job, tmp_path, progress=progress)
+    assert transferred
+
+class LocalUploadHttp(FakeHttp):
+    def __init__(self):
+        super().__init__('tripo')
+        self.uploaded = []
+
+    def request_json(self, method, url, *, token, payload=None):
+        if url.endswith('/files/presign'):
+            self.calls.append((method, url, payload))
+            return {'data': {'presigned_url': 'https://upload.example/model', 'file_token': 'file_local_snapshot'}}
+        return super().request_json(method, url, token=token, payload=payload)
+
+    def upload_file(self, url, source, *, content_type):
+        self.uploaded.append(Path(source).read_bytes())
+
+
+@pytest.mark.parametrize('operation', ['retopology', 'texture', 'rig'])
+def test_local_scene_model_uploads_snapshot_and_creates_new_result(tmp_path, operation):
+    import struct
+    import time
+    from meshdock.core.service import AssetPipelineService
+    from meshdock.core.staging import StagingStore
+    raw = b'glTF' + struct.pack('<II', 2, 12)
+    source = tmp_path / 'model.glb'
+    source.write_bytes(raw)
+    http = LocalUploadHttp()
+    adapter = TripoAdapter(FakeCredentials(), http, poll_interval=0)
+    service = AssetPipelineService({adapter.id: adapter}, StagingStore(tmp_path / 'stage'))
+    try:
+        capabilities = service.local_process_operations()['operations']
+        assert operation in capabilities
+        assert 'animate' not in capabilities  # requires a rig result, never pretend otherwise
+        assert not http.calls
+        assert service.list_jobs()['jobs'] == []
+        job = service.register_local_model(source, '自建物体 B')
+        candidate = job['candidates'][0]
+        source.write_bytes(b'changed after staging')
+        params = {'face_limit': 1000} if operation == 'retopology' else {}
+        task = service.submit_candidate_process(job['id'], candidate['id'], operation, adapter.id, params)
+        deadline = time.monotonic() + 3
+        while task['state'] in {'queued', 'processing'} and time.monotonic() < deadline:
+            time.sleep(.01)
+            task = service.get_process_status(job['id'], task['id'])
+        assert task['state'] == 'completed', task
+        assert http.uploaded == [raw]
+        submits = [call for call in http.calls if call[0] == 'POST' and not call[1].endswith('presign')]
+        assert submits[0][2]['input'] == 'file_local_snapshot'
+        final = service.get_job(job['id'])
+        assert len(final['candidates']) == 2
+        assert final['candidates'][0]['id'] == candidate['id']
+        assert final['candidates'][1]['metadata']['parent_candidate_id'] == candidate['id']
+        assert 'provider_task_id' not in final['candidates'][0]['metadata']
+        assert service.candidate_local_path(job['id'], candidate['id']).read_bytes() == raw
+    finally:
+        service.shutdown()
+
+
+def test_local_processing_rejects_invalid_snapshot(tmp_path):
+    from meshdock.core.service import AssetPipelineService
+    from meshdock.core.staging import StagingStore
+    service = AssetPipelineService({}, StagingStore(tmp_path / 'stage'))
+    try:
+        source = tmp_path / 'not-a-model.glb'
+        source.write_bytes(b'broken')
+        with pytest.raises(ValidationError):
+            service.register_local_model(source, 'B')
+        assert service.list_jobs()['jobs'] == []
+    finally:
+        service.shutdown()

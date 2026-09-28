@@ -28,6 +28,7 @@ def main() -> None:
     staging_context = tempfile.TemporaryDirectory(prefix="meshdock-blender-smoke-")
     os.environ["MESHDOCK_DEV_MOCK"] = "1"
     os.environ["MESHDOCK_STAGING"] = staging_context.name
+    os.environ["MESHDOCK_BRIDGE_DESCRIPTOR"] = str(Path(staging_context.name) / "bridge.json")
     meshdock.register()
     try:
         service = get_runtime().service
@@ -150,7 +151,8 @@ def main() -> None:
         exported = service.export_selected_asset(created["id"])
         assert exported["job"]["state"] == "exported", exported
         assert exported["artifact"]["format"] == "glb", exported
-        assert bpy.data.collections.get("MeshDock_Staging") is not None
+        assert all(bpy.data.collections.get(item["imported_collection"]) is not None
+                   for item in imported["candidates"])
         print("MESHDOCK_SMOKE_BEGIN")
         print(json.dumps({"job": imported["id"], "artifact": exported["artifact"]}, ensure_ascii=False))
         print("MESHDOCK_SMOKE_END")
@@ -158,6 +160,7 @@ def main() -> None:
         meshdock.unregister()
         os.environ.pop("MESHDOCK_DEV_MOCK", None)
         os.environ.pop("MESHDOCK_STAGING", None)
+        os.environ.pop("MESHDOCK_BRIDGE_DESCRIPTOR", None)
         staging_context.cleanup()
 
 

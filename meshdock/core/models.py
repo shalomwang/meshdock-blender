@@ -315,6 +315,7 @@ class AssetJob:
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     state: JobState = JobState.DRAFT
     progress: float = 0.0
+    phase: str = ""
     provider_task_ids: dict[str, str] = field(default_factory=dict)
     candidates: list[Candidate] = field(default_factory=list)
     references: list[ReferenceImage] = field(default_factory=list)
@@ -343,6 +344,7 @@ class AssetJob:
             "id": self.id,
             "state": self.state.value,
             "progress": round(self.progress, 3),
+            "phase": self.phase,
             "spec": self.spec.public_dict(),
             "candidates": [candidate.public_dict() for candidate in self.candidates],
             "references": [reference.public_dict() for reference in self.references],
@@ -369,7 +371,7 @@ class AssetJob:
         result["candidates"] = [candidate.persisted_dict() for candidate in self.candidates]
         result["references"] = [reference.persisted_dict() for reference in self.references]
         result["artifacts"] = self.artifacts
-        result["process_tasks"] = [task.public_dict() for task in self.process_tasks]
+        result["process_tasks"] = [{**task.public_dict(), "provider_task_id": task.provider_task_id} for task in self.process_tasks]
         result["events"] = [asdict(event) for event in self.events]
         return result
 
@@ -390,6 +392,7 @@ class AssetJob:
             id=str(value["id"]),
             state=state,
             progress=float(value.get("progress", 0.0)),
+            phase=str(value.get("phase", "")),
             provider_task_ids={str(k): str(v) for k, v in value.get("provider_task_ids", {}).items()},
             candidates=candidates,
             references=references,

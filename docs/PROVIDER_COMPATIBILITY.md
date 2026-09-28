@@ -1,48 +1,42 @@
-# Provider compatibility and adaptive UI
+# 服务商兼容矩阵
 
-Provider/model limits are declared by each adapter and consumed by the task service, Blender UI and MCP bridge. The UI is not a second source of truth: hidden controls and server-side validation use the same resolved constraint object.
+本表描述 Mesh Dock 0.10.0 的适配器支持范围，不代表平台提供的全部功能。界面和任务提交共用输入约束；不支持的参数会在排队前被拒绝。
 
-## Generation input matrix
+## 生成输入
 
-| Provider/model | Text | Single image | Multi-view | Multi-view slots | Formats |
-| --- | --- | --- | --- | --- | --- |
-| Tripo CN/Global V3.1/V3.0/V2.5/P1 | Yes | 1 front | 2–4, front required | front, left, back, right | PNG, JPEG, WebP |
-| Hunyuan Direct 3.0 | Yes | 1 front | 2–4, front required | front, left, right, back | PNG/JPEG for multi-view; WebP also for single image |
-| Hunyuan Direct 3.1 | Yes | 1 front | 2–8, front required | 3.0 slots plus top, bottom, left-front, right-front | PNG/JPEG for multi-view; WebP also for single image |
-| TokenHub CN/Global Hunyuan 3.0/3.1 | Yes | Same as corresponding Hunyuan model | Same as corresponding Hunyuan model | Model-dependent | Model-dependent |
-| TokenHub CN/Global Tripo 3.1/P1 | Yes | Hidden | Hidden | — | — |
-| Compare | Yes | 1 front | Intersection of both selected adapters: 2–4 | front, left, back, right | Intersection of both adapters |
+| 服务与模型 | 文字 | 单图 | 多视图 | 视图入口 |
+| --- | --- | --- | --- | --- |
+| Tripo CN / Global：V3.1、V3.0、V2.5、P1 | 支持 | 正面图 | 2–4 张，正面必需 | 正面、左、背面、右 |
+| 混元 Direct 3.0 | 支持 | 正面图 | 2–4 张，正面必需 | 正面、左、右、背面 |
+| 混元 Direct 3.1 | 支持 | 正面图 | 2–8 张，正面必需 | 3.0 的四视图，加顶、底、左前、右前 |
+| TokenHub 混元 3.0 / 3.1 | 支持 | 随对应模型 | 随对应模型 | 随对应模型 |
+| TokenHub Tripo 3.1 / P1 | 支持 | 未启用 | 未启用 | — |
 
-Hunyuan multi-view input enforces dimensions greater than 128 and less than 5000 pixels and a 6 MB raw-file total. Tripo requires at least 128 pixels per side. Tencent's current public TokenHub Tripo guide describes text and image capability but publishes only the production text request body; the plugin therefore exposes text only for those two TokenHub models instead of guessing a billable image payload. Job creation rejects stale or unsupported inputs before queueing or provider billing.
+Tripo 接受 PNG、JPEG、WebP。混元多视图接受 PNG、JPEG；单图也可用 WebP。Tripo 图片每边至少 128 像素；混元多视图要求每边大于 128、小于 5000 像素，原文件合计不超过 6 MB。
 
-Official references:
+TokenHub Tripo 暂只开放文字输入，避免提交未明确验证的图片请求。MCP 的 Compare 功能使用两个适配器共同支持的输入范围。
 
-- [Tripo multi-view generation](https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard)
-- [Tencent Hunyuan professional generation](https://cloud.tencent.com/document/product/1804/123447)
-- [Tencent TokenHub Hunyuan API](https://cloud.tencent.com/document/product/1823/130082)
-- [Tencent TokenHub Tripo API](https://cloud.tencent.com/document/product/1823/136143)
+## 界面与处理
 
-## Blender behavior
+- 选择平台、模型或输入方式后，可用账号、视图和参数会重新计算；图片草稿保留，仅提交兼容视图。
+- Tripo V2.5 不显示 V3 专用的几何、分件和质量控件。绑定模型不同，可用角色类型也不同。
+- 混元 3.1 不显示 LowPoly 和 Sketch 类型；TokenHub Tripo 不显示混元参数。
+- 后处理只列出当前来源、格式和账号支持的操作。动作生成要求服务商返回的绑定结果。
+- 自建或修改后的网格需要支持本地 GLB 上传的服务。上传快照不会保留完整 Blender 材质节点、动画或骨架。
 
-- The generation method is selected first. Blender then hides incompatible providers; model changes recalculate view buttons and limits.
-- Dynamic provider, account, job, candidate and operation enums use stable numeric ids, so filtering never changes the selected value by list position.
-- Switching to a narrower model removes incompatible UI references from the pending form; managed source files are not silently deleted.
-- Image format, dimensions, count and aggregate size are checked again when the job is created.
-- Tripo V2.5 hides V3-only geometry, parts and quality controls.
-- Tripo single-image mode alone shows image autofix, texture alignment and orientation; these fields are rejected for text/multi-view requests.
-- Tripo rig v1.0 accepts only biped; rig v2.5 accepts non-humanoid rig types. Unsupported combinations never reach billing.
-- Hunyuan 3.1 hides LowPoly and Sketch generation types; TokenHub Tripo hides all Hunyuan-only fields.
-- Candidate post-process menus contain only operations supported by a configured provider and compatible with the candidate source/format.
-- Animation appears only for an actual provider rig-result candidate.
+这些限制由适配器实现，模拟测试不等于真实账号或计费验证。服务商更新接口后，插件可能需要升级。
 
-## MCP behavior
+## 凭据与 MCP
 
-Call `get_generation_constraints` before composing an image job and `get_process_capabilities` before post-processing a candidate. `create_asset_job` and process submission independently repeat validation, so a client cannot bypass Blender's hidden/disabled controls by sending raw JSON.
+账号按 Tripo CN、Tripo Global、混元 Direct、TokenHub CN 和 TokenHub Global 分开管理。新密钥默认存入系统凭据库；不可用时回退到当前 Blender 会话。任务提交后绑定所选账号，异步执行期间切换界面不会换用另一个密钥。
 
-No bridge method returns a provider credential, provider download URL or arbitrary local path.
+MCP 客户端应先调用 `get_generation_constraints` 或 `get_process_capabilities` 再提交任务。提交时仍会重复校验。MCP 不返回凭据、账号备注、服务商下载地址或任意本地路径。
 
-## Credential resolution
+## 官方参考
 
-The account manager supports multiple profiles for each explicit supplier: Tripo CN, Tripo Global, Hunyuan Direct, TokenHub China and TokenHub Global. New accounts are saved to the native OS credential store by default; if native storage is unavailable, Blender clearly falls back to session memory. The manager lists accounts for the selected supplier and provides explicit activate and delete actions. The local profile registry contains only opaque random ids, provider names and notes. A job binds its selected opaque id so later UI changes cannot switch credentials during asynchronous work.
+- [Tripo 多视图生成](https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard)
+- [腾讯混元专业版任务](https://cloud.tencent.com/document/product/1804/123447)
+- [TokenHub 混元 API](https://cloud.tencent.com/document/product/1823/130082)
+- [TokenHub Tripo API](https://cloud.tencent.com/document/product/1823/136143)
 
-The Blender process may also resolve only fixed allowlisted variables: `TRIPO_API_KEY`, `TRIPO_CN_API_KEY`, `TRIPO_GLOBAL_API_KEY`, `HUNYUAN_3D_API_KEY`, `HUNYUAN_DIRECT_API_KEY`, `TOKENHUB_API_KEY`, `TOKENHUB_CN_API_KEY`, `TOKENHUB_INTL_API_KEY` and `TOKENHUB_GLOBAL_API_KEY`. An explicitly selected profile wins, followed by session profiles, saved profiles and the environment profile. MCP does not expose profile ids, notes, sources or environment variable names; public status remains provider/configured/available booleans. For better isolation, inject variables only into the Blender launch process rather than the whole desktop session.
+提交前请核对平台的账号权限和最新价格。费用预估不能代替服务商账单。

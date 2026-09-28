@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import zipfile
 import hashlib
 import tomllib
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,8 +18,9 @@ def main() -> None:
     destination = ROOT / "dist" / f"meshdock-{package_version()}.zip"
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for source in sorted(PACKAGE.rglob("*")):
-            if source.is_dir() or "__pycache__" in source.parts or source.suffix == ".pyc":
+        archive.write(PACKAGE / "blender_manifest.toml", "blender_manifest.toml")
+        for source in sorted(PACKAGE.rglob("*.py")):
+            if "__pycache__" in source.parts:
                 continue
             archive.write(source, source.relative_to(PACKAGE).as_posix())
         archive.write(ROOT / "LICENSE", "LICENSE")

@@ -8,7 +8,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..core.errors import PipelineError
 from .properties import (
-    effective_advanced, effective_process_params, generation_constraints,
+    active_references, effective_advanced, effective_process_params, generation_constraints,
     selected_generation_account,
     _provider_input_updated,
 )
@@ -59,7 +59,7 @@ class AI3D_OT_manage_credentials(bpy.types.Operator, _PipelineOperator):
             row = current.row(align=True)
             enabled = bool(profile["enabled"])
             icon = "CHECKBOX_HLT" if enabled else "CHECKBOX_DEHLT"
-            label = str(profile["note"]) or f'{iface_("Profile")} {index}'
+            label = str(profile["note"]) or f'{iface_("Account")} {index}'
             source = iface_(source_labels.get(profile["source"], "Available"))
             row.label(text=f"{label} · {source}", icon=icon)
             toggle = row.operator(
@@ -78,6 +78,8 @@ class AI3D_OT_manage_credentials(bpy.types.Operator, _PipelineOperator):
                 remove.profile_id = str(profile["id"])
         layout.separator()
         layout.label(text="Add Account")
+        from .platform_links import KEY_URLS
+        layout.operator("wm.url_open", text="获取 API Key / Get API Key", icon="URL").url=KEY_URLS[self.provider]
         layout.prop(self, "secret")
         layout.prop(self, "note")
         if get_runtime().credentials.persistence_available:
@@ -187,7 +189,7 @@ class AI3D_OT_create_and_generate(bpy.types.Operator, _PipelineOperator):
                     "prompt": props.prompt,
                     "input_mode": props.input_mode,
                     "reference_images": {
-                        item.view: item.reference_id for item in props.reference_images
+                        item.view: item.reference_id for item in active_references(props)
                     },
                     "asset_profile": props.asset_profile,
                     "provider": provider,
@@ -198,6 +200,8 @@ class AI3D_OT_create_and_generate(bpy.types.Operator, _PipelineOperator):
                     "advanced": advanced,
                 }
             )
+            from .workbench_preview import own_job
+            own_job(context.scene, job["id"])
             props.last_job_id = job["id"]
             generated = service.generate_candidates(job["id"])
             get_runtime().request_auto_import(job["id"])
@@ -300,6 +304,12 @@ class AI3D_OT_add_reference_image(bpy.types.Operator, ImportHelper, _PipelineOpe
             if constraint["max_total_bytes"] and int(reference["bytes"]) > int(constraint["max_total_bytes"]):
                 get_runtime().service.remove_reference_image(str(reference["id"]))
                 raise ValueError("Reference exceeds the provider image-size limit")
+            minimum=constraint.get("min_dimension",0);maximum=constraint.get("max_dimension",0)
+            invalid_dimension=(minimum and min(reference["width"],reference["height"])<minimum) or (maximum and max(reference["width"],reference["height"])>maximum)
+            invalid_size=constraint.get("max_file_bytes") and reference["bytes"]>constraint["max_file_bytes"]
+            if invalid_dimension or invalid_size:
+                get_runtime().service.remove_reference_image(str(reference["id"]))
+                raise ValueError(f"图片不符合当前模型限制，原图已保留 / Image outside model limits ({minimum or 1}–{maximum or '∞'} px)")
             existing_index = next(
                 (i for i, item in enumerate(props.reference_images) if item.view == self.view), None
             )
@@ -316,6 +326,13 @@ class AI3D_OT_add_reference_image(bpy.types.Operator, ImportHelper, _PipelineOpe
             item.bytes = int(reference["bytes"])
             item.width = int(reference["width"])
             item.height = int(reference["height"])
+            try:
+                from .workspace import show_reference
+                preview = show_reference(context, len(props.reference_images) - 1)
+                preview.preview_ensure()
+                context.scene["meshdock_large_reference"] = -1
+            except Exception:
+                pass  # Preview failure must not reject a valid managed reference.
             _provider_input_updated(props, context)
             self.report({"INFO"}, f"Registered {self.view} reference")
             return {"FINISHED"}
@@ -336,6 +353,7 @@ class AI3D_OT_remove_reference_image(bpy.types.Operator, _PipelineOperator):
             item = props.reference_images[self.index]
             get_runtime().service.remove_reference_image(item.reference_id)
             props.reference_images.remove(self.index)
+            context.scene["meshdock_large_reference"] = -1
             return {"FINISHED"}
         except Exception as exc:
             return self.fail(exc)
@@ -381,7 +399,10 @@ class AI3D_OT_retry_job(bpy.types.Operator, _PipelineOperator):
         props = context.scene.meshdock
         try:
             retried = get_runtime().service.retry_job(props.last_job_id)
+            from .workbench_preview import own_job
+            own_job(context.scene, retried["id"])
             props.last_job_id = retried["id"]
+            get_runtime().request_auto_import(retried["id"])
             self.report({"INFO"}, "Replacement generation job queued")
             return {"FINISHED"}
         except Exception as exc:
@@ -632,7 +653,10 @@ class AI3D_OT_regenerate_candidate(bpy.types.Operator, _PipelineOperator):
         props = context.scene.meshdock
         try:
             result = get_runtime().service.regenerate_candidate(props.last_job_id, props.candidate_id)
+            from .workbench_preview import own_job
+            own_job(context.scene, result["id"])
             props.last_job_id = result["id"]
+            get_runtime().request_auto_import(result["id"])
             self.report({"INFO"}, "Candidate regeneration queued as a new job")
             return {"FINISHED"}
         except Exception as exc:
@@ -644,22 +668,73 @@ class AI3D_OT_process_candidate(bpy.types.Operator, _PipelineOperator):
     bl_label = "Start Provider Process"
     bl_description = "Submit an immutable provider post-processing artifact"
 
-    def invoke(self, context, event):
-        return context.window_manager.invoke_confirm(self, event)
+    def capture(self, context):
+        from .process_target import generated_target, local_target
+        props=context.scene.meshdock
+        target=generated_target(context)
+        obj=local_target(context) if target is None else context.active_object
+        if obj is None:
+            raise ValueError("请选择要处理的网格模型 / Select a mesh to process")
+        self._target={"scene":context.scene,"layer":context.view_layer,"object":obj,"candidate":target,
+                      "operation":props.process_operation,"provider":props.process_provider,
+                      "params":effective_process_params(props),"credit_limit":props.max_estimated_credits}
+        from .properties import selected_process_provider
+        from .workflow import target_summary
+        self._target['provider']=selected_process_provider(props) or props.process_provider
+        self._target['scope']=target_summary(context)
+        adapter=get_runtime().service.providers.get(self._target['provider'])
+        self._target['estimate']=adapter.estimate_process_credits(props.process_operation,self._target['params']) if adapter else None
+        return self._target
 
-    def execute(self, context):
-        props = context.scene.meshdock
+    def invoke(self, context, event):
         try:
-            params = effective_process_params(props)
-            task = get_runtime().service.submit_candidate_process(
-                props.last_job_id, props.candidate_id, props.process_operation,
-                props.process_provider, params,
-            )
-            props.last_process_task_id = task["id"]
-            self.report({"INFO"}, f'{props.process_operation} queued')
-            return {"FINISHED"}
+            self.capture(context)
+            return context.window_manager.invoke_props_dialog(self,width=420)
         except Exception as exc:
             return self.fail(exc)
+
+    def draw(self, context):
+        from .workbench_controls import tr
+        target=self._target
+        self.layout.label(text=tr('处理目标：','Target: ')+target['object'].name,icon='MESH_DATA')
+        from .workflow import operation_label,provider_label
+        self.layout.label(text=target.get('scope',''))
+        self.layout.label(text=tr('操作：','Operation: ')+operation_label(target['operation']))
+        self.layout.label(text=tr('服务：','Service: ')+provider_label(target['provider']))
+        estimate=target.get('estimate')
+        self.layout.label(text=tr('预计费用：','Estimated cost: ')+f'{estimate:g} '+tr('积分','credits') if estimate is not None else tr('费用尚未知，请以服务商账单为准','Cost unknown; provider billing applies'),icon='INFO')
+        self.layout.label(text=tr('生成新结果，保留原模型','Creates a new result; keeps the original'),icon='DUPLICATE')
+        if target['candidate'] is None:
+            self.layout.label(text=tr('上传该物体的当前网格与材质快照','Upload this object’s current mesh and materials'),icon='EXPORT')
+        else:
+            self.layout.label(text=tr('检查整个独立结果；修改过则重新上传','Checks the whole result; uploads again if modified'))
+
+    def execute(self, context):
+        window=context.window
+        if window: window.cursor_modal_set('WAIT')
+        try:
+            from .process_target import prepare_processing_source
+            from .workbench_preview import own_job
+            target=getattr(self,'_target',None) or self.capture(context)
+            scene=target['scene'];obj=target['object']
+            if obj.name not in scene.objects:
+                raise ValueError('The processing target is no longer in its original scene')
+            with context.temp_override(scene=scene,view_layer=target['layer']):
+                ids=prepare_processing_source(context,obj,target['candidate'],target['credit_limit'])
+                own_job(scene,ids[0])
+                task=get_runtime().service.submit_candidate_process(
+                    ids[0],ids[1],target['operation'],target['provider'],target['params'])
+                props=scene.meshdock
+                props.selected_job_key=ids[0];props.last_job_id=ids[0];props.candidate_id=ids[1]
+                props.last_process_task_id=task['id']
+                scene['meshdock_process_tasks']=list(dict.fromkeys([*scene.get('meshdock_process_tasks',[]),task['id']]))
+                get_runtime().request_process_result(ids[0],task['id'])
+            self.report({'INFO'},f"{target['operation']} queued: {obj.name}")
+            return {'FINISHED'}
+        except Exception as exc:
+            return self.fail(exc)
+        finally:
+            if window: window.cursor_modal_restore()
 
 
 class AI3D_OT_cancel_process(bpy.types.Operator, _PipelineOperator):

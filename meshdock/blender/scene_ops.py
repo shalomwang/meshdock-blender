@@ -42,14 +42,19 @@ def import_candidate(job: AssetJob, candidate_id: str) -> str:
     if suffix not in {".obj", ".glb", ".gltf", ".fbx", ".stl", ".usd", ".usdz"} or not source.is_file():
         raise ValidationError("candidate must be a supported staged 3D file")
 
-    staging = bpy.data.collections.get("MeshDock_Staging") or bpy.data.collections.get("AI_Staging")
+    is_preview = bool(bpy.context.scene.get("meshdock_preview"))
+    staging_name = "MeshDock_Preview_" + bpy.context.scene.name if is_preview else "MeshDock_" + bpy.context.scene.name
+    staging = bpy.data.collections.get(staging_name)
     if staging is None:
-        staging = bpy.data.collections.new("MeshDock_Staging")
+        staging = bpy.data.collections.new(staging_name)
+    if staging.name not in {c.name for c in bpy.context.scene.collection.children}:
         bpy.context.scene.collection.children.link(staging)
     job_collection = _ensure_child(staging, f"Job_{job.id[:8]}_{_pascal_case(job.spec.asset_name)}")
     collection_name = f"Candidate_{job.id[:8]}_{_pascal_case(candidate_id)}"
     candidate_collection = _ensure_child(job_collection, collection_name)
 
+    candidate_collection["meshdock_job_id"]=job.id
+    candidate_collection["meshdock_candidate_id"]=candidate_id
     before = set(bpy.data.objects)
     before_actions = {action.name for action in bpy.data.actions}
     if suffix == ".obj":
@@ -479,7 +484,8 @@ def export_reviewed_asset(
         if export_format in {"glb", "gltf"}:
             bpy.ops.export_scene.gltf(
                 filepath=str(destination), export_format="GLB" if export_format == "glb" else "GLTF_SEPARATE",
-                use_selection=True, export_apply=bool(settings["apply_modifiers"]),
+                use_selection=True, use_active_scene=True,
+                export_apply=bool(settings["apply_modifiers"]),
                 export_cameras=False, export_lights=False,
                 export_animations=bool(settings["include_animations"]),
             )

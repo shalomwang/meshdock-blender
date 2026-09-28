@@ -31,10 +31,20 @@ staging/
 *.part
 *.bak
 
+# One-off local UI captures and debugging scripts
+tools/_audit*.py
+tools/_fingerprint_debug.py
+
+# Superseded local test scripts; maintained tests use descriptive names
+tools/blender_local_processing_smoke_test.py
+tools/blender_workspace_smoke_test.py
+tools/blender_workbench_smoke_test.py
+
 # Blender recovery and local scene files
 *.blend1
 *.blend2
 *.blend@
+*.blend
 
 # Editors and operating systems
 .idea/

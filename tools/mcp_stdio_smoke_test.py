@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from meshdock import __version__
 STOP_FILE = ROOT / "staging" / "mcp-smoke.stop"
 
 
@@ -37,7 +39,7 @@ def main() -> None:
 
     try:
         initialized = request("initialize", {"protocolVersion": "2025-06-18"})
-        assert initialized["result"]["serverInfo"]["version"] == "0.9.7"
+        assert initialized["result"]["serverInfo"]["version"] == __version__
         listed = request("tools/list")
         names = {tool["name"] for tool in listed["result"]["tools"]}
         assert "select_candidate" not in names

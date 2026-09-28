@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from ..bridge.client import BlenderBridgeClient
 from ..core.errors import PipelineError
+from .. import __version__
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
 REAL_PROVIDER_ENUM = [
@@ -373,7 +374,7 @@ class McpServer:
                 result = {
                     "protocolVersion": MCP_PROTOCOL_VERSION,
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "meshdock-blender", "version": "0.9.7"},
+                    "serverInfo": {"name": "meshdock-blender", "version": __version__},
                     "instructions": INSTRUCTIONS,
                 }
             elif method == "ping":
